@@ -35,11 +35,19 @@ export default function AppSettingsPage() {
       const appSettings = await getAppSettings();
       setSettings(appSettings);
 
-      // Set GST settings
-      setCgst(appSettings.gst.cgst);
-      setSgst(appSettings.gst.sgst);
-      setIgst(appSettings.gst.igst);
-      setDefaultGSTType(appSettings.gst.defaultType);
+      // Set GST settings with fallback to defaults
+      if (appSettings.gst) {
+        setCgst(appSettings.gst.cgst || 1.5);
+        setSgst(appSettings.gst.sgst || 1.5);
+        setIgst(appSettings.gst.igst || 3);
+        setDefaultGSTType(appSettings.gst.defaultType || "cgst_sgst");
+      } else {
+        // Use defaults if gst object doesn't exist
+        setCgst(1.5);
+        setSgst(1.5);
+        setIgst(3);
+        setDefaultGSTType("cgst_sgst");
+      }
 
       // Set company settings
       setCompanyName(appSettings.companyName || "");
@@ -53,6 +61,18 @@ export default function AppSettingsPage() {
     } catch (error) {
       console.error("Error loading settings:", error);
       toast.error("Failed to load settings");
+      
+      // Set defaults on error
+      setCgst(1.5);
+      setSgst(1.5);
+      setIgst(3);
+      setDefaultGSTType("cgst_sgst");
+      setCompanyName("");
+      setCompanyAddress("");
+      setCompanyPhone("");
+      setCompanyEmail("");
+      setCompanyGSTIN("");
+      setInvoicePrefix("INV");
     } finally {
       setLoading(false);
     }

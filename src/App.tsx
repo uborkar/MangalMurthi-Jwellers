@@ -52,8 +52,8 @@ export default function App() {
       <ShopProvider>
         <Router>
           <ScrollToTop />
-          <Toaster 
-            position="top-right" 
+          <Toaster
+            position="top-right"
             toastOptions={{
               style: {
                 zIndex: 99999,
@@ -62,86 +62,86 @@ export default function App() {
               duration: 3000,
             }}
           />
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/signin" element={<SignIn />} />
-          <Route path="/signup" element={<SignUp />} />
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/signin" element={<SignIn />} />
+            <Route path="/signup" element={<SignUp />} />
 
-          {/* Print Page - Outside Layout but Protected */}
-          <Route 
-            path="/print-barcodes" 
-            element={
-              <ProtectedRoute>
-                <PrintBarcodes />
-              </ProtectedRoute>
-            } 
-          />
+            {/* Print Page - Outside Layout but Protected */}
+            <Route
+              path="/print-barcodes"
+              element={
+                <ProtectedRoute>
+                  <PrintBarcodes />
+                </ProtectedRoute>
+              }
+            />
 
-          {/* Protected Dashboard Layout */}
-          <Route 
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index path="/" element={<Home />} />
+            {/* Protected Dashboard Layout */}
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index path="/" element={<Home />} />
 
-            {/* Warehouse */}
-            <Route path="/warehouse/stock-in" element={<StockIn />} />
-            <Route path="/warehouse/tagging" element={<Tagging />} />
-            <Route path="/warehouse/distribution" element={<Distribution />} />
-            <Route path="/warehouse/reports" element={<WarehouseReports />} />
-            <Route path="/warehouse/returns" element={<Returns />} />
-            <Route path="/warehouse/returned-items" element={<ReturnedItems />} />
-            <Route path="/warehouse/diagnostic" element={<WarehouseDiagnostic />} />
-            
-            <Route path="/test-firestore" element={<TestFirestore />} />
-            <Route path="/migrate-warehouse" element={<MigrateWarehouse />} />
-            
-            <Route path="/test-connection" element={<TestConnection />} />
-            
-            {/* Shops */}
-            <Route path="/shops/branch-stock" element={<BranchStock />} />
-            <Route path="/shops/billing" element={<Billing />} />
-            <Route path="/shops/sale-booking" element={<SalesBooking />} />
-            <Route path="/shops/sales-report" element={<SalesReport />} />
-            <Route path="/shops/sales-return" element={<SalesReturn />} />
-            <Route path="/shops/shop-expense" element={<ShopExpense />} />
-            <Route path="/shops/shop-expense-report" element={<ShopExpenseReport />} />
-            <Route path="/shops/shop-transfer" element={<ShopTransfer />} />
-            <Route path="/shops/shop-transfer-report" element={<ShopTransferReport />} />
-            <Route path="/shops/ca-report" element={<CAReport />} />
+              {/* Warehouse */}
+              <Route path="/warehouse/stock-in" element={<StockIn />} />
+              <Route path="/warehouse/tagging" element={<Tagging />} />
+              <Route path="/warehouse/distribution" element={<Distribution />} />
+              <Route path="/warehouse/reports" element={<WarehouseReports />} />
+              <Route path="/warehouse/returns" element={<Returns />} />
+              <Route path="/warehouse/returned-items" element={<ReturnedItems />} />
+              <Route path="/warehouse/diagnostic" element={<WarehouseDiagnostic />} />
 
-            {/* Others Page */}
-            <Route path="/profile" element={<UserProfiles />} />
-            <Route path="/settings" element={<AppSettingsPage />} />
-            <Route path="/calendar" element={<Calendar />} />
-            <Route path="/blank" element={<Blank />} />
+              <Route path="/test-firestore" element={<TestFirestore />} />
+              <Route path="/migrate-warehouse" element={<MigrateWarehouse />} />
 
-            {/* Forms */}
-            <Route path="/form-elements" element={<FormElements />} />
+              <Route path="/test-connection" element={<TestConnection />} />
 
-            {/* Tables */}
-            <Route path="/basic-tables" element={<BasicTables />} />
+              {/* Shops */}
+              <Route path="/shops/branch-stock" element={<BranchStock />} />
+              <Route path="/shops/billing" element={<Billing />} />
+              <Route path="/shops/sale-booking" element={<SalesBooking />} />
+              <Route path="/shops/sales-report" element={<SalesReport />} />
+              <Route path="/shops/sales-return" element={<SalesReturn />} />
+              <Route path="/shops/shop-expense" element={<ShopExpense />} />
+              <Route path="/shops/shop-expense-report" element={<ShopExpenseReport />} />
+              <Route path="/shops/shop-transfer" element={<ShopTransfer />} />
+              <Route path="/shops/shop-transfer-report" element={<ShopTransferReport />} />
+              <Route path="/shops/ca-report" element={<CAReport />} />
 
-            {/* Ui Elements */}
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/avatars" element={<Avatars />} />
-            <Route path="/badge" element={<Badges />} />
-            <Route path="/buttons" element={<Buttons />} />
-            <Route path="/images" element={<Images />} />
-            {/* <Route path="/videos" element={<Videos />} /> */}
+              {/* Others Page */}
+              <Route path="/profile" element={<UserProfiles />} />
+              <Route path="/settings" element={<AppSettingsPage />} />
+              <Route path="/calendar" element={<Calendar />} />
+              <Route path="/blank" element={<Blank />} />
 
-            {/* Charts */}
-            <Route path="/line-chart" element={<LineChart />} />
-            <Route path="/bar-chart" element={<BarChart />} />
-          </Route>
+              {/* Forms */}
+              <Route path="/form-elements" element={<FormElements />} />
 
-          {/* Fallback Route */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Router>
+              {/* Tables */}
+              <Route path="/basic-tables" element={<BasicTables />} />
+
+              {/* Ui Elements */}
+              <Route path="/alerts" element={<Alerts />} />
+              <Route path="/avatars" element={<Avatars />} />
+              <Route path="/badge" element={<Badges />} />
+              <Route path="/buttons" element={<Buttons />} />
+              <Route path="/images" element={<Images />} />
+              {/* <Route path="/videos" element={<Videos />} /> */}
+
+              {/* Charts */}
+              <Route path="/line-chart" element={<LineChart />} />
+              <Route path="/bar-chart" element={<BarChart />} />
+            </Route>
+
+            {/* Fallback Route */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Router>
       </ShopProvider>
     </AuthProvider>
   );

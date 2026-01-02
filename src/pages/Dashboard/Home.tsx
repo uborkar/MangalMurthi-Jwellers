@@ -22,7 +22,7 @@ export default function Home() {
   return (
     <>
       <PageMeta
-        title="Dashboard - Suwarnasparsh Jewellers"
+        title="Dashboard - Mangal-Murthi Jewellers"
         description="Your personalized dashboard"
       />
       
