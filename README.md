@@ -4,8 +4,6 @@ MangalMurthi Distributors is a multi-branch jewellery distribution and retail op
 
 To ensure accuracy, compliance, and transparency, the operations are supported by a dedicated ERP system that manages inventory flow, sales billing, cash and expense tracking, and CA-ready financial and GST reporting. The system enables precise item-level traceability, real-time branch reporting, and legally compliant documentation required for audits and taxation.
 
-![Mangalmurthi React.js Dashboard Preview](./banner.png)
-
 ## Overview
 
 
