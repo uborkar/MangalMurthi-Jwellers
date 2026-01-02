@@ -59,7 +59,6 @@ export default function SignInForm() {
                     placeholder="admin@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    required
                     disabled={loading}
                   />
                 </div>
@@ -73,7 +72,6 @@ export default function SignInForm() {
                       placeholder="Enter your password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      required
                       disabled={loading}
                     />
                     <span
@@ -97,14 +95,13 @@ export default function SignInForm() {
                   </div>
                 </div>
                 <div>
-                  <Button
+                  <button
                     type="submit"
-                    className="w-full"
-                    size="sm"
+                    className="w-full px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
                     disabled={loading}
                   >
                     {loading ? "Signing in..." : "Sign in"}
-                  </Button>
+                  </button>
                 </div>
               </div>
             </form>

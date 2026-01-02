@@ -33,7 +33,7 @@ interface ShopContextType {
     customerPhone: string;
     salespersonName: string;
   };
-  updateBill: (updates: Partial<typeof currentBill>) => void;
+  updateBill: (updates: Partial<ShopContextType['currentBill']>) => void;
   clearBill: () => void;
   
   // Loading States
@@ -108,8 +108,8 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const updateBill = (updates: Partial<typeof currentBill>) => {
-    setCurrentBill((prev) => ({
+  const updateBill = (updates: Partial<ShopContextType['currentBill']>) => {
+    setCurrentBill((prev: ShopContextType['currentBill']) => ({
       ...prev,
       ...updates,
     }));

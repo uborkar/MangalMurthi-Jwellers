@@ -1,6 +1,6 @@
 // src/components/warehouse/QuickActions.tsx - Quick action buttons for warehouse
 import { useNavigate } from "react-router-dom";
-import { Package, Printer, CheckCircle, Truck, FileText, RotateCcw } from "lucide-react";
+import { Package, CheckCircle, Truck, FileText } from "lucide-react";
 
 interface ActionButton {
   label: string;

@@ -3,11 +3,10 @@ import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
-import { Settings, Save, Percent, Building2, Phone, Mail, FileText } from "lucide-react";
+import { Save, Percent, Building2, Phone, Mail, FileText } from "lucide-react";
 import { getAppSettings, updateGSTSettings, updateCompanySettings, AppSettings } from "../../firebase/settings";
 
 export default function AppSettingsPage() {
-  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -33,7 +32,6 @@ export default function AppSettingsPage() {
     setLoading(true);
     try {
       const appSettings = await getAppSettings();
-      setSettings(appSettings);
 
       // Set GST settings with fallback to defaults
       if (appSettings.gst) {

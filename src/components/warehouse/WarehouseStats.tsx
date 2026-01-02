@@ -4,7 +4,6 @@ import { Package, CheckCircle, Truck, ShoppingBag, AlertCircle, Printer } from "
 import {
   getItemCountByStatus,
   getTotalValueByStatus,
-  ItemStatus,
 } from "../../firebase/warehouseItems";
 import toast from "react-hot-toast";
 

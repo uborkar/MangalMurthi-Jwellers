@@ -132,6 +132,7 @@ export async function createSaleLedgerEntry(
   await createLedgerEntry(branch, {
     date: new Date().toISOString(),
     type: "sale",
+    branch,
     referenceId: invoiceId,
     referenceType: "invoice",
     partyName: customerName,
@@ -165,6 +166,7 @@ export async function createBookingLedgerEntry(
   await createLedgerEntry(branch, {
     date: new Date().toISOString(),
     type: "booking",
+    branch,
     referenceId: bookingId,
     referenceType: "booking",
     partyName,
@@ -199,6 +201,7 @@ export async function createBookingPaymentEntry(
   await createLedgerEntry(branch, {
     date: new Date().toISOString(),
     type: "booking_payment",
+    branch,
     referenceId: bookingId,
     referenceType: "booking",
     partyName,
@@ -228,6 +231,7 @@ export async function createExpenseLedgerEntry(
   await createLedgerEntry(branch, {
     date: new Date().toISOString(),
     type: "expense",
+    branch,
     referenceId: expenseId,
     referenceType: "expense",
     partyName: category,
