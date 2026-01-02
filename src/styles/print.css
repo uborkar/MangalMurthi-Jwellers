@@ -1,0 +1,295 @@
+/* =====================================================
+   MANGALMURTI JEWELLERS – MICRO FOLDED BARCODE TAG
+   Suitable for Rings, Small Pendants, Stones
+   Physical Size (PRINT):
+   - Left  : 1 inch (25.4mm)
+   - Gap   : 2mm
+   - Right : 1 inch (25.4mm)
+   - Total : 52.8mm (≈ 2.08 inch)
+   - Height: 12mm (0.47 inch)
+   ===================================================== */
+
+
+/* =====================================================
+   SCREEN PREVIEW STYLES (ONLY FOR UI PREVIEW)
+   ===================================================== */
+@media screen {
+  body {
+    background: #f3f4f6;
+  }
+
+  .print-header {
+    display: block;
+    text-align: center;
+    padding: 16px;
+    background: #ffffff;
+    border-bottom: 2px solid #e5e7eb;
+  }
+
+  .print-header h1 {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .print-header p {
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .print-area {
+    display: block;
+  }
+
+  .screen-only-info {
+    display: block;
+    padding: 12px;
+    margin: 12px;
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #075985;
+  }
+
+  .tags-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    padding: 20px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .tag-unfolded {
+    display: flex;
+    min-height: 80px;
+    border: 2px solid #d1d5db;
+    background: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .tag-back {
+    flex: 1;
+    padding: 8px;
+    background: #f9fafb;
+    border-right: 2px dashed #9ca3af;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .tag-info-line {
+    display: flex;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .tag-label {
+    font-weight: 600;
+    min-width: 40px;
+    color: #374151;
+  }
+
+  .tag-value {
+    font-weight: 500;
+    color: #111827;
+  }
+
+  .tag-gap {
+    width: 14px;
+    background: repeating-linear-gradient(
+      to bottom,
+      #d1d5db,
+      #d1d5db 2px,
+      #ffffff 2px,
+      #ffffff 4px
+    );
+  }
+
+  .tag-front {
+    flex: 1;
+    padding: 8px;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .item-name {
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .barcode-text {
+    font-size: 10px;
+    font-family: monospace;
+    font-weight: 600;
+  }
+}
+
+
+/* =====================================================
+   PRINT STYLES – ACTUAL PHYSICAL TAG SIZE
+   ===================================================== */
+@media print {
+
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 8mm;
+  }
+
+  /* Hide everything except print */
+  body * {
+    visibility: hidden !important;
+  }
+
+  #print-area,
+  #print-area *,
+  .print-header,
+  .print-header * {
+    visibility: visible !important;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: white;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .screen-only-info {
+    display: none !important;
+  }
+
+  .print-header {
+    text-align: center;
+    margin-bottom: 5mm;
+  }
+
+  .print-header h1 {
+    font-size: 12pt;
+    font-weight: 700;
+  }
+
+  .print-header p {
+    font-size: 8pt;
+  }
+
+  /* Container */
+  .tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4mm;
+  }
+
+  /* =====================================
+     UNFOLDED TAG – FINAL REAL SIZE
+     ===================================== */
+  .tag-unfolded {
+    width: 52.8mm;   /* 2.08 inch */
+    height: 12mm;    /* 0.47 inch */
+    display: flex;
+    border: 0.3mm solid #000;
+    box-sizing: border-box;
+    page-break-inside: avoid;
+    background: white;
+  }
+
+  /* LEFT SIDE – INTERNAL INFO (1 INCH) */
+  .tag-back {
+    width: 25.4mm;
+    height: 12mm;
+    padding: 0.6mm 0.8mm;
+    box-sizing: border-box;
+    font-size: 5px;
+    line-height: 1.1;
+    border-right: 0.3mm dashed #000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4mm;
+  }
+
+  .tag-info-line {
+    display: flex;
+    gap: 0.4mm;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tag-label {
+    font-weight: 700;
+    min-width: 7mm;
+  }
+
+  .tag-value {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* FOLD / TIE GAP (VERY NARROW) */
+  .tag-gap {
+    width: 2mm;
+    height: 12mm;
+    border-left: 0.2mm dashed #666;
+    border-right: 0.2mm dashed #666;
+    box-sizing: border-box;
+  }
+
+  /* RIGHT SIDE – BARCODE (1 INCH) */
+  .tag-front {
+    width: 25.4mm;
+    height: 12mm;
+    padding: 0.4mm;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3mm;
+  }
+
+  .item-name {
+    font-size: 5.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    line-height: 1.1;
+  }
+
+  /* BARCODE SIZE – SCANNABLE BUT SMALL */
+  .barcode-container svg {
+    max-width: 24mm;
+    max-height: 5.5mm;
+    width: auto !important;
+    height: auto !important;
+    display: block !important;
+  }
+
+  .barcode-text {
+    font-size: 4.5px;
+    font-family: "Courier New", monospace;
+    font-weight: 600;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  svg,
+  svg * {
+    visibility: visible !important;
+  }
+}

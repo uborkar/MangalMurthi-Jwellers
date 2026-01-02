@@ -83,15 +83,15 @@ const AppHeader: React.FC = () => {
             {/* Cross Icon */}
           </button>
 
-          <Link to="/" className="lg:hidden">
+          <Link to="/" className="lg:hidden flex items-center">
             <img
-              className="dark:hidden"
-              src="./images/logo/Logo1.svg"
+              className="dark:hidden h-8 w-auto"
+              src="/images/logo/Logo1.svg"
               alt="Logo"
             />
             <img
-              className="hidden dark:block"
-              src="./images/logo/Auth-logo1.svg"
+              className="hidden dark:block h-8 w-auto"
+              src="/images/logo/Auth-logo1.svg"
               alt="Logo"
             />
           </Link>
@@ -152,9 +152,8 @@ const AppHeader: React.FC = () => {
           </div>
         </div>
         <div
-          className={`${
-            isApplicationMenuOpen ? "flex" : "hidden"
-          } items-center justify-between w-full gap-4 px-5 py-4 lg:flex shadow-theme-md lg:justify-end lg:px-0 lg:shadow-none`}
+          className={`${isApplicationMenuOpen ? "flex" : "hidden"
+            } items-center justify-between w-full gap-4 px-5 py-4 lg:flex shadow-theme-md lg:justify-end lg:px-0 lg:shadow-none`}
         >
           <div className="flex items-center gap-2 2xsm:gap-3">
             {/* <!-- Dark Mode Toggler --> */}

@@ -1,382 +1,478 @@
-// src/pages/Shops/Billing.tsx
-import React, { useEffect, useMemo, useState } from "react";
+// src/pages/Shops/Billing.tsx - Simplified Billing with Barcode Scanner
+import { useEffect, useState } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
-import { PlusCircle, Trash2, Download, Printer } from "lucide-react";
 import toast from "react-hot-toast";
-import {
-  BranchStockItem,
-  getShopStock,
-} from "../../firebase/shopStock";
-import { saveInvoice } from "../../firebase/invoices";
-import { markBranchItemSold } from "../../firebase/branchStock";
+import { Trash2, Download, Printer, ShoppingCart } from "lucide-react";
+import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
+import { getItemByBarcode, markItemSold } from "../../firebase/warehouseItems";
+import BarcodeScanner from "../../components/common/BarcodeScanner";
+import { doc, updateDoc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { db } from "../../firebase/config";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { useShop } from "../../context/ShopContext";
+import { createSaleLedgerEntry } from "../../firebase/ledger";
+import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
 
-/**
- * Billing.tsx (Hybrid Jewellery POS)
- *
- * HYBRID PRICING:
- *  - If pricingMode === "weight" and goldRate + weight exist:
- *      price = (goldRate * weightG) + stoneCharge + makingCharge + profitOnGold
- *      profitOnGold = (goldRate * weightG * profitPercent / 100)
- *  - Else (fallback "type"):
- *      price = typeAmount + makingCharge + (typeAmount * profitPercent / 100)
- *
- * TAX:
- *  - Discount is per line (₹)
- *  - Taxable = (price * qty) - discount
- *  - GST_RATE (e.g. 3%) is applied on taxable
- *  - CGST = GST/2, SGST = GST/2
- */
+import { numberToWords } from "../../utils/numberToWords";
 
-type BranchName = "Sangli" | "Miraj" | "Kolhapur";
+type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
-interface BillRow {
+interface BillItem {
   id: string;
-  stockItemId?: string; // Firestore doc id in shop stockitem
-  label: string;
-  productName?: string;
-  branch: BranchName;
-  typeAmount: number; // base / type price (if any)
-  pricingMode: "weight" | "type";
-  weightG: number;
-  goldRate: number;
-  making: number;
-  stoneCharge: number;
-  profitPercent: number;
-  qty: number;
-  price: number; // final unit price before tax
-  discount: number;
+  barcode: string;
+  category: string;
+  subcategory?: string;
+  location: string; // Location (Loct)
+  type: string; // costPriceType (CP-A, CP-B, etc.)
+  weight: string;
+  costPrice: number;
+  sellingPrice: number;
+  discount: number; // Manual discount
   taxableAmount: number;
+  shopStockId?: string;
+  warehouseItemId?: string;
 }
 
-const GST_RATE = 3; // total (CGST+SGST)
-const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur"];
+const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
-function uid() {
-  return Math.random().toString(36).slice(2, 9);
-}
+export default function Billing() {
+  const { branchStockCache, setBranchStockCache, currentBill, updateBill, clearBill } = useShop();
+  
+  const [selectedBranch, setSelectedBranch] = useState<BranchName>(currentBill.branch);
+  const [customerName, setCustomerName] = useState(currentBill.customerName);
+  const [customerPhone, setCustomerPhone] = useState(currentBill.customerPhone);
+  const [salespersonName, setSalespersonName] = useState(currentBill.salespersonName);
+  const [billItems, setBillItems] = useState<BillItem[]>(currentBill.items);
+  const [branchStock, setBranchStock] = useState<BranchStockItem[]>(branchStockCache[selectedBranch] || []);
+  const [loading, setLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [lastInvoice, setLastInvoice] = useState<any>(null);
+  
+  // GST Settings
+  const [gstSettings, setGstSettings] = useState<GSTSettings | null>(null);
+  const [gstType, setGstType] = useState<"cgst_sgst" | "igst">("cgst_sgst");
+  const [companySettings, setCompanySettings] = useState<any>(null);
 
-// Map branch name to short code for "location" column
-const BRANCH_CODE_MAP: Record<BranchName, string> = {
-  Sangli: "SG",
-  Miraj: "MJ",
-  Kolhapur: "KL",
-};
-
-const Billing: React.FC = () => {
-  // invoice-level
-  const [selectedBranch, setSelectedBranch] = useState<BranchName>("Sangli");
-  const [customerName, setCustomerName] = useState<string>("");
-  const [salesman, setSalesman] = useState<string>("");
-
-  // branch stock (available items at shop)
-  const [branchStock, setBranchStock] = useState<BranchStockItem[]>([]);
-  const [stockLoading, setStockLoading] = useState(false);
-  const [stockSelected, setStockSelected] = useState<Record<string, boolean>>(
-    {}
-  );
-
-  // bill rows
-  const [rows, setRows] = useState<BillRow[]>([]);
-
-  // -------------------------
-  // FIRESTORE: Load branch stock
-  // -------------------------
+  // Load GST settings and company info
   useEffect(() => {
-    async function load() {
-      try {
-        setStockLoading(true);
-        const data = await getShopStock(selectedBranch);
-        setBranchStock(data);
-        setStockSelected({});
-      } catch (err) {
-        console.error(err);
-        toast.error("Failed to load branch stock");
-      } finally {
-        setStockLoading(false);
-      }
+    loadGSTSettings();
+    loadCompanySettings();
+  }, []);
+
+  const loadGSTSettings = async () => {
+    try {
+      const settings = await getGSTSettings();
+      setGstSettings(settings);
+      setGstType(settings.defaultType);
+    } catch (error) {
+      console.error("Error loading GST settings:", error);
     }
-    load();
+  };
+
+  const loadCompanySettings = async () => {
+    try {
+      const settings = await getAppSettings();
+      setCompanySettings(settings);
+    } catch (error) {
+      console.error("Error loading company settings:", error);
+    }
+  };
+
+  // Sync with context whenever bill items change (with debounce to avoid too many updates)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      try {
+        updateBill({
+          branch: selectedBranch,
+          items: billItems,
+          customerName,
+          customerPhone,
+          salespersonName,
+        });
+      } catch (error) {
+        console.error("Error updating bill context:", error);
+      }
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [billItems, selectedBranch, customerName, customerPhone, salespersonName]);
+
+  // Load branch stock (with caching)
+  useEffect(() => {
+    loadBranchStock();
   }, [selectedBranch]);
 
-  // -------------------------
-  // Pricing logic (Hybrid A+B)
-  // -------------------------
-  const computeUnitPrice = (row: {
-    pricingMode: "weight" | "type";
-    weightG: number;
-    goldRate: number;
-    stoneCharge: number;
-    making: number;
-    typeAmount: number;
-    profitPercent: number;
-  }): number => {
-    const {
-      pricingMode,
-      weightG,
-      goldRate,
-      stoneCharge,
-      making,
-      typeAmount,
-      profitPercent,
-    } = row;
-
-    // Weight-based model
-    if (
-      pricingMode === "weight" &&
-      weightG > 0 &&
-      goldRate > 0
-    ) {
-      const goldValue = goldRate * weightG;
-      const profitOnGold = (goldValue * profitPercent) / 100;
-      const total =
-        goldValue + profitOnGold + (stoneCharge || 0) + (making || 0);
-      return Number(total.toFixed(2));
-    }
-
-    // Type-based fallback
-    const profitOnType = (typeAmount * profitPercent) / 100;
-    const totalType = typeAmount + profitOnType + (making || 0);
-    return Number(totalType.toFixed(2));
-  };
-
-  const recalcRow = (r: BillRow): BillRow => {
-    const price = computeUnitPrice(r);
-    const lineTotal = price * r.qty;
-    const taxable = lineTotal - r.discount;
-    return {
-      ...r,
-      price,
-      taxableAmount: Number(Math.max(taxable, 0).toFixed(2)),
-    };
-  };
-
-  // -------------------------
-  // Add from stock selection
-  // -------------------------
-
-  const toggleStockSelect = (id: string) => {
-    setStockSelected((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
-  };
-
-  const addSelectedStockToBill = () => {
-    const chosen = branchStock.filter((s) => s.id && stockSelected[s.id]);
-    if (!chosen.length) {
-      toast("Select at least one stock item first", { icon: "⚠️" });
+  const loadBranchStock = async () => {
+    // Check cache first (only for available items)
+    if (branchStockCache[selectedBranch] && branchStockCache[selectedBranch].length > 0) {
+      const available = branchStockCache[selectedBranch].filter((s) => s.status === "in-branch" || !s.status);
+      setBranchStock(available);
+      console.log(`✅ Loaded ${available.length} available items from cache for ${selectedBranch}`);
       return;
     }
 
-    const newRows: BillRow[] = [];
-
-    chosen.forEach((item) => {
-      const pricingMode: "weight" | "type" =
-        item.pricingMode || "type";
-
-      const baseRow: BillRow = {
-        id: uid(),
-        stockItemId: item.id,
-        label: item.label,
-        productName: item.productName,
-        branch: selectedBranch,
-        pricingMode,
-        weightG: Number(item.weightG || item.weight || 0),
-        goldRate: Number(item.goldRate || 0),
-        typeAmount: Number(item.typeAmount || item.basePrice || 0),
-        making: Number(item.makingCharge || 0),
-        stoneCharge: Number(item.stoneCharge || 0),
-        profitPercent: Number(item.profitPercent || 0),
-        qty: 1,
-        price: 0,
-        discount: 0,
-        taxableAmount: 0,
-      };
-
-      const withCalc = recalcRow(baseRow);
-      newRows.push(withCalc);
-    });
-
-    setRows((prev) => [...prev, ...newRows]);
-    setStockSelected({});
-    toast.success(`${chosen.length} item(s) added to bill`);
+    // Load from Firebase
+    setLoading(true);
+    try {
+      const stock = await getShopStock(selectedBranch);
+      
+      // Cache ALL items (including sold)
+      setBranchStockCache(selectedBranch, stock);
+      
+      // But only show available items in billing
+      const available = stock.filter((s) => s.status === "in-branch" || !s.status);
+      setBranchStock(available);
+      
+      toast.success(`Loaded ${available.length} available items from ${selectedBranch}`);
+    } catch (error) {
+      console.error("Error loading stock:", error);
+      toast.error("Failed to load branch stock");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // -------------------------
-  // Manual row updates
-  // -------------------------
-  const updateRowField = <K extends keyof BillRow>(
-    rowId: string,
-    field: K,
-    value: BillRow[K]
-  ) => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.id !== rowId) return r;
-        const updated: BillRow = { ...r, [field]: value };
-        return recalcRow(updated);
+  // Handle barcode scan
+  const handleBarcodeScan = async (barcode: string) => {
+    // Prevent empty scans
+    if (!barcode || !barcode.trim()) {
+      return;
+    }
+
+    const trimmedBarcode = barcode.trim();
+
+    try {
+      // Check if already in bill
+      if (billItems.find((i) => i.barcode === trimmedBarcode)) {
+        toast.error(`Item ${trimmedBarcode} already in bill`);
+        return;
+      }
+
+      // Find in branch stock (check both barcode and label)
+      const stockItem = branchStock.find(
+        (s) => s.barcode === trimmedBarcode || s.label === trimmedBarcode
+      );
+
+      if (!stockItem) {
+        toast.error(`Item ${trimmedBarcode} not found in ${selectedBranch} stock`);
+        return;
+      }
+
+      if (stockItem.status !== "in-branch") {
+        toast.error(`Item ${trimmedBarcode} is not available (status: ${stockItem.status})`);
+        return;
+      }
+
+      // Get warehouse item for details (optional, use stock item if not found)
+      let warehouseItem = null;
+      try {
+        warehouseItem = await getItemByBarcode(trimmedBarcode);
+      } catch (err) {
+        console.log("Warehouse item not found, using stock item data");
+      }
+
+      // Add to bill (no quantity - each scan = 1 item)
+      const newItem: BillItem = {
+        id: crypto.randomUUID(),
+        barcode: trimmedBarcode,
+        category: stockItem.category || warehouseItem?.category || "Unknown",
+        subcategory: stockItem.subcategory || warehouseItem?.subcategory,
+        location: stockItem.location || warehouseItem?.location || "-",
+        type: stockItem.costPriceType || warehouseItem?.costPriceType || "-",
+        weight: String(stockItem.weight || warehouseItem?.weight || "0"),
+        costPrice: stockItem.costPrice || warehouseItem?.costPrice || 0,
+        sellingPrice: stockItem.costPrice || warehouseItem?.costPrice || 0, // Can be edited
+        discount: 0, // Manual discount
+        taxableAmount: 0,
+        shopStockId: stockItem.id,
+        warehouseItemId: warehouseItem?.id,
+      };
+
+      // Calculate taxable amount
+      const calculated = calculateItemTaxable(newItem);
+      setBillItems((prev) => [...prev, calculated]);
+      toast.success(`✅ Added: ${stockItem.category} (${trimmedBarcode})`);
+    } catch (error) {
+      console.error("Error scanning barcode:", error);
+      toast.error("Failed to process barcode");
+    }
+  };
+
+  // Calculate taxable amount for an item (with discount)
+  const calculateItemTaxable = (item: BillItem): BillItem => {
+    const taxable = item.sellingPrice - item.discount; // Selling price minus discount
+    return {
+      ...item,
+      taxableAmount: Math.max(taxable, 0),
+    };
+  };
+
+  // Update item field
+  const updateItem = (id: string, field: keyof BillItem, value: any) => {
+    setBillItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const updated = { ...item, [field]: value };
+        return calculateItemTaxable(updated);
       })
     );
   };
 
-  const removeRow = (rowId: string) => {
-    setRows((prev) => prev.filter((r) => r.id !== rowId));
+  // Remove item
+  const removeItem = (id: string) => {
+    setBillItems((prev) => prev.filter((i) => i.id !== id));
   };
 
-  const addBlankRow = () => {
-    const base: BillRow = {
-      id: uid(),
-      stockItemId: undefined,
-      label: "",
-      productName: "",
-      branch: selectedBranch,
-      pricingMode: "type",
-      weightG: 0,
-      goldRate: 0,
-      typeAmount: 0,
-      making: 0,
-      stoneCharge: 0,
-      profitPercent: 0,
-      qty: 1,
-      price: 0,
-      discount: 0,
-      taxableAmount: 0,
-    };
-    setRows((prev) => [...prev, base]);
+  // Calculate totals with dynamic GST
+  const totals = {
+    subtotal: billItems.reduce((sum, item) => sum + item.sellingPrice, 0),
+    totalDiscount: billItems.reduce((sum, item) => sum + item.discount, 0),
+    taxable: billItems.reduce((sum, item) => sum + item.taxableAmount, 0),
+    gst: 0,
+    cgst: 0,
+    sgst: 0,
+    igst: 0,
+    grandTotal: 0,
   };
 
-  // -------------------------
-  // Totals & taxes
-  // -------------------------
-  const totals = useMemo(() => {
-    const subtotal = rows.reduce(
-      (s, r) => s + r.price * r.qty,
-      0
-    );
-    const totalDiscount = rows.reduce((s, r) => s + r.discount, 0);
-    const taxable = rows.reduce(
-      (s, r) => s + r.taxableAmount,
-      0
-    );
+  // Calculate GST based on type and settings
+  if (gstSettings) {
+    const gstCalc = calculateGST(totals.taxable, gstType, gstSettings);
+    totals.cgst = gstCalc.cgst;
+    totals.sgst = gstCalc.sgst;
+    totals.igst = gstCalc.igst;
+    totals.gst = gstCalc.totalGST;
+  }
 
-    const gstTotal = Number(((taxable * GST_RATE) / 100).toFixed(2));
-    const cgst = Number((gstTotal / 2).toFixed(2));
-    const sgst = Number((gstTotal / 2).toFixed(2));
-    const grandTotal = Number((taxable + gstTotal).toFixed(2));
+  totals.grandTotal = totals.taxable + totals.gst;
 
-    return {
-      subtotal,
-      totalDiscount,
-      taxable,
-      gstTotal,
-      cgst,
-      sgst,
-      grandTotal,
-    };
-  }, [rows]);
+  // Save invoice
+  const handleSaveInvoice = async () => {
+    console.log("🔵 Save Invoice clicked");
+    
+    if (billItems.length === 0) {
+      toast.error("Add at least one item to the bill");
+      return;
+    }
 
-  // -------------------------
-  // Export Excel
-  // -------------------------
-  const handleExportExcel = () => {
-    if (rows.length === 0) {
+    if (!customerName.trim()) {
+      toast.error("Enter customer name");
+      return;
+    }
+
+    if (!salespersonName.trim()) {
+      toast.error("Enter salesperson name");
+      return;
+    }
+
+    console.log("🔵 Validation passed, saving invoice...");
+    const loadingToast = toast.loading("Saving invoice...");
+
+    try {
+      const invoiceId = `INV-${selectedBranch}-${Date.now()}`;
+      console.log("🔵 Invoice ID:", invoiceId);
+
+      // Mark items as sold in warehouse
+      console.log("🔵 Marking items as sold...");
+      for (const item of billItems) {
+        if (item.warehouseItemId) {
+          await markItemSold(item.warehouseItemId, invoiceId);
+          console.log("✅ Marked warehouse item as sold:", item.warehouseItemId);
+        }
+
+        // Update shop stock status
+        if (item.shopStockId) {
+          const shopStockRef = doc(
+            db,
+            "shops",
+            selectedBranch,
+            "stockItems",
+            item.shopStockId
+          );
+          await updateDoc(shopStockRef, {
+            status: "sold",
+            soldAt: new Date().toISOString(),
+            soldInvoiceId: invoiceId,
+          });
+          console.log("✅ Updated shop stock status:", item.shopStockId);
+        }
+      }
+
+      // Save invoice to Firestore
+      console.log("🔵 Saving invoice to Firestore...");
+      const invoiceRef = doc(db, "shops", selectedBranch, "invoices", invoiceId);
+      
+      // Prepare invoice data (ensure no undefined values)
+      const invoiceData = {
+        invoiceId,
+        branch: selectedBranch,
+        customerName,
+        customerPhone: customerPhone || "",
+        salespersonName,
+        items: billItems.map((item) => ({
+          barcode: item.barcode,
+          category: item.category,
+          subcategory: item.subcategory || "",
+          location: item.location || "",
+          type: item.type || "",
+          weight: item.weight || "",
+          costPrice: item.costPrice || 0,
+          sellingPrice: item.sellingPrice || 0,
+          discount: item.discount || 0,
+          taxableAmount: item.taxableAmount || 0,
+        })),
+        totals: {
+          subtotal: totals.subtotal || 0,
+          totalDiscount: totals.totalDiscount || 0,
+          taxable: totals.taxable || 0,
+          cgst: totals.cgst || 0,
+          sgst: totals.sgst || 0,
+          igst: totals.igst || 0,
+          gst: totals.gst || 0,
+          grandTotal: totals.grandTotal || 0,
+        },
+        gstType: gstType || "cgst_sgst",
+        gstSettings: {
+          cgst: gstSettings?.cgst || 1.5,
+          sgst: gstSettings?.sgst || 1.5,
+          igst: gstSettings?.igst || 3,
+        },
+        createdAt: new Date().toISOString(),
+      };
+      
+      await setDoc(invoiceRef, invoiceData);
+
+      console.log("✅ Invoice saved successfully!");
+      toast.dismiss(loadingToast);
+      toast.success("✅ Invoice saved successfully!");
+
+      // Create ledger entry for sale
+      try {
+        await createSaleLedgerEntry(
+          selectedBranch,
+          invoiceId,
+          customerName,
+          customerPhone,
+          totals.grandTotal,
+          salespersonName,
+          "current-user" // TODO: Get from auth
+        );
+        console.log("✅ Ledger entry created for sale");
+      } catch (ledgerError) {
+        console.error("Error creating ledger entry:", ledgerError);
+        // Don't fail the sale if ledger fails
+      }
+
+      // Show print confirmation dialog
+      const shouldPrint = window.confirm(
+        "Invoice saved successfully!\n\nDo you want to print the invoice now?"
+      );
+
+      if (shouldPrint) {
+        // Print the invoice
+        window.print();
+      }
+
+      // Ask if user wants to clear the bill
+      const shouldClear = window.confirm(
+        "Do you want to clear the bill and start a new one?"
+      );
+
+      if (shouldClear) {
+        // Clear cache to force fresh load (to show sold items)
+        setBranchStockCache(selectedBranch, []);
+        
+        // Clear bill from context
+        clearBill();
+        
+        // Reset local state
+        setBillItems([]);
+        setCustomerName("");
+        setCustomerPhone("");
+        setSalespersonName("");
+        
+        console.log("✅ State cleared, reloading stock...");
+        // Reload stock (will fetch fresh data including sold items)
+        await loadBranchStock();
+        console.log("✅ Stock reloaded!");
+      } else {
+        // Keep the invoice on screen for reference
+        toast("Invoice kept on screen. You can print again or manually clear.", {
+          duration: 5000,
+        });
+      }
+    } catch (error) {
+      console.error("❌ Error saving invoice:", error);
+      toast.dismiss(loadingToast);
+      toast.error(`Failed to save invoice: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  };
+
+  // Load last invoice
+  const loadLastInvoice = async () => {
+    try {
+      const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
+      const q = query(invoicesRef, orderBy("createdAt", "desc"), limit(1));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        setLastInvoice(snap.docs[0].data());
+        setShowHistory(true);
+        toast.success("Last invoice loaded");
+      } else {
+        toast("No previous invoices found");
+      }
+    } catch (error) {
+      console.error("Error loading last invoice:", error);
+      toast.error("Failed to load invoice history");
+    }
+  };
+
+  // Export to Excel
+  const exportToExcel = () => {
+    if (billItems.length === 0) {
       toast.error("No items to export");
       return;
     }
 
-    // Prepare data for Excel
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const excelData: any[] = rows.map((row, idx) => ({
+    const data = billItems.map((item, idx) => ({
       "Sr No": idx + 1,
-      "Label": row.label,
-      "Product": row.productName || "-",
-      "Location": BRANCH_CODE_MAP[row.branch] || row.branch,
-      "Mode": row.pricingMode,
-      "Weight (g)": row.weightG,
-      "Gold Rate": row.goldRate,
-      "Type/Base": row.typeAmount,
-      "Making": row.making,
-      "Stone": row.stoneCharge,
-      "Profit %": row.profitPercent,
-      "Qty": row.qty,
-      "Price": row.price,
-      "Discount": row.discount,
-      "Taxable": row.taxableAmount,
+      "Item Name": item.category,
+      "Barcode": item.barcode,
+      "Lot": "-",
+      "Pcs": 1,
+      "Weight": item.weight,
+      "Type": item.type,
+      "Rate": item.sellingPrice,
+      "Taxable Value": item.taxableAmount,
     }));
 
-    // Add totals row
-    excelData.push({
+    // Add totals
+    data.push({
       "Sr No": "",
-      "Label": "",
-      "Product": "",
-      "Location": "",
-      "Mode": "",
-      "Weight (g)": "",
-      "Gold Rate": "",
-      "Type/Base": "",
-      "Making": "",
-      "Stone": "",
-      "Profit %": "",
-      "Qty": "",
-      "Price": "SUBTOTAL",
-      "Discount": totals.totalDiscount,
-      "Taxable": totals.taxable,
-    });
+      "Item Name": "",
+      "Barcode": "",
+      "Lot": "",
+      "Pcs": billItems.length,
+      "Weight": "",
+      "Type": "",
+      "Rate": "TOTAL",
+      "Taxable Value": totals.taxable,
+    } as any);
 
-    excelData.push({
-      "Sr No": "",
-      "Label": "",
-      "Product": "",
-      "Location": "",
-      "Mode": "",
-      "Weight (g)": "",
-      "Gold Rate": "",
-      "Type/Base": "",
-      "Making": "",
-      "Stone": "",
-      "Profit %": "",
-      "Qty": "",
-      "Price": `GST (${GST_RATE}%)`,
-      "Discount": "",
-      "Taxable": totals.gstTotal,
-    });
-
-    excelData.push({
-      "Sr No": "",
-      "Label": "",
-      "Product": "",
-      "Location": "",
-      "Mode": "",
-      "Weight (g)": "",
-      "Gold Rate": "",
-      "Type/Base": "",
-      "Making": "",
-      "Stone": "",
-      "Profit %": "",
-      "Qty": "",
-      "Price": "GRAND TOTAL",
-      "Discount": "",
-      "Taxable": totals.grandTotal,
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Invoice");
-
-    const fileName = `Invoice_${selectedBranch}_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(workbook, fileName);
-    toast.success("Excel file downloaded");
+    XLSX.writeFile(workbook, `Invoice_${selectedBranch}_${Date.now()}.xlsx`);
+    toast.success("Excel exported");
   };
 
-  // -------------------------
-  // Export PDF
-  // -------------------------
-  const handleExportInvoicePDF = () => {
-    if (rows.length === 0) {
+  // Export to PDF
+  const exportToPDF = () => {
+    if (billItems.length === 0) {
       toast.error("No items to export");
       return;
     }
@@ -386,169 +482,65 @@ const Billing: React.FC = () => {
     // Header
     doc.setFontSize(18);
     doc.text("SALES INVOICE", 105, 15, { align: "center" });
-    
+
     doc.setFontSize(11);
     doc.text(`Branch: ${selectedBranch}`, 14, 25);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 32);
-    
-    if (customerName) {
-      doc.text(`Customer: ${customerName}`, 14, 39);
-    }
-    if (salesman) {
-      doc.text(`Salesman: ${salesman}`, 14, 46);
-    }
+    doc.text(`Customer: ${customerName}`, 14, 39);
+    if (customerPhone) doc.text(`Phone: ${customerPhone}`, 14, 46);
+    doc.text(`Salesperson: ${salespersonName}`, 14, customerPhone ? 53 : 46);
 
-    // Table data
-    const tableData = rows.map((row, idx) => [
+    // Table
+    const tableData = billItems.map((item, idx) => [
       idx + 1,
-      row.label,
-      row.productName || "-",
-      row.pricingMode,
-      row.weightG,
-      row.qty,
-      `₹${row.price.toFixed(2)}`,
-      `₹${row.discount.toFixed(2)}`,
-      `₹${row.taxableAmount.toFixed(2)}`,
+      item.category,
+      item.barcode,
+      "-", // Lot
+      1, // Pcs
+      item.weight,
+      item.type,
+      `₹${item.sellingPrice}`,
+      `₹${item.taxableAmount}`,
     ]);
 
     autoTable(doc, {
-      startY: customerName || salesman ? 52 : 39,
-      head: [["#", "Label", "Product", "Mode", "Weight", "Qty", "Price", "Disc", "Taxable"]],
+      startY: customerPhone ? 60 : 53,
+      head: [["#", "Item", "Barcode", "Lot", "Pcs", "Wt", "Type", "Rate", "Taxable"]],
       body: tableData,
       theme: "grid",
-      headStyles: { fillColor: [41, 128, 185] },
-      styles: { fontSize: 8 },
     });
 
-    // Get final Y position after table
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-
     // Totals
-    doc.setFontSize(10);
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.text(`Subtotal: ₹${totals.subtotal.toFixed(2)}`, 140, finalY);
-    doc.text(`Discount: ₹${totals.totalDiscount.toFixed(2)}`, 140, finalY + 7);
-    doc.text(`Taxable: ₹${totals.taxable.toFixed(2)}`, 140, finalY + 14);
-    doc.text(`CGST (${(GST_RATE / 2)}%): ₹${totals.cgst.toFixed(2)}`, 140, finalY + 21);
-    doc.text(`SGST (${(GST_RATE / 2)}%): ₹${totals.sgst.toFixed(2)}`, 140, finalY + 28);
-    
+    doc.text(`Taxable: ₹${totals.taxable.toFixed(2)}`, 140, finalY + 7);
+    doc.text(`CGST (1.5%): ₹${totals.cgst.toFixed(2)}`, 140, finalY + 21);
+    doc.text(`SGST (1.5%): ₹${totals.sgst.toFixed(2)}`, 140, finalY + 21);
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text(`Grand Total: ₹${totals.grandTotal.toFixed(2)}`, 140, finalY + 38);
+    doc.text(`Grand Total: ₹${totals.grandTotal.toFixed(2)}`, 140, finalY + 31);
 
-    const fileName = `Invoice_${selectedBranch}_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
-    toast.success("PDF downloaded");
+    doc.save(`Invoice_${selectedBranch}_${Date.now()}.pdf`);
+    toast.success("PDF exported");
   };
 
-  // -------------------------
-  // Print
-  // -------------------------
-  const handlePrint = () => {
-    if (rows.length === 0) {
-      toast.error("No items to print");
-      return;
-    }
-    window.print();
-  };
-
-  // -------------------------
-  // Save Invoice (Firestore)
-  // -------------------------
-  const handleSaveInvoice = async () => {
-    if (!rows.length) {
-      toast.error("Add at least one item to bill");
-      return;
-    }
-
-    const invoicePayload = {
-      branch: selectedBranch,
-      customerName: customerName || null,
-      salesman: salesman || null,
-      rows: rows.map((r) => ({
-        stockItemId: r.stockItemId || null,
-        label: r.label,
-        productName: r.productName || "",
-        branch: r.branch,
-        pricingMode: r.pricingMode,
-        weightG: r.weightG,
-        goldRate: r.goldRate,
-        typeAmount: r.typeAmount,
-        making: r.making,
-        stoneCharge: r.stoneCharge,
-        profitPercent: r.profitPercent,
-        qty: r.qty,
-        price: r.price,
-        discount: r.discount,
-        taxableAmount: r.taxableAmount,
-      })),
-      totals,
-      gstRate: GST_RATE,
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      toast.loading("Saving invoice...");
-      const invoiceId = await saveInvoice(selectedBranch, invoicePayload);
-
-      // Mark related stock items as sold
-      const sellOps: Promise<void>[] = [];
-      rows.forEach((r) => {
-        if (r.stockItemId) {
-          sellOps.push(
-            markBranchItemSold(selectedBranch, r.stockItemId, invoiceId)
-          );
-        }
-      });
-
-      await Promise.all(sellOps);
-
-      toast.dismiss();
-      toast.success("Invoice saved & items marked as sold");
-
-      // reset
-      setRows([]);
-      setCustomerName("");
-      setSalesman("");
-
-      // refresh stock
-      const refreshed = await getShopStock(selectedBranch);
-      setBranchStock(refreshed);
-    } catch (err) {
-      console.error(err);
-      toast.dismiss();
-      toast.error("Failed to save invoice");
-    }
-  };
-
-  // -------------------------
-  // Render
-  // -------------------------
   return (
     <>
-      <PageMeta
-        title="POS Billing - Branch"
-        description="Create sales invoice from branch stock (Hybrid pricing)"
-      />
+      <PageMeta title="Billing - POS" description="Point of Sale billing system" />
 
       <div className="grid grid-cols-12 gap-6">
         <div className="col-span-12">
-          <TASection
-            title="🧾 POS Billing (Jewellery)"
-            subtitle="Select items from branch stock and generate GST-compliant invoice."
-          >
-            {/* Top controls: branch + export */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+          <TASection title="🧾 Point of Sale - Billing" subtitle="Scan items and generate invoices">
+            {/* Branch & Customer Info */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
                   Branch
                 </label>
                 <select
                   value={selectedBranch}
-                  onChange={(e) =>
-                    setSelectedBranch(e.target.value as BranchName)
-                  }
-                  className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                  onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
+                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
                 >
                   {BRANCHES.map((b) => (
                     <option key={b} value={b}>
@@ -558,341 +550,165 @@ const Billing: React.FC = () => {
                 </select>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleExportExcel}
-                  className="px-3 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl flex items-center gap-2 font-medium transition-colors dark:bg-green-600 dark:hover:bg-green-700"
-                >
-                  <Download size={16} /> Excel
-                </button>
-                <button
-                  onClick={handleExportInvoicePDF}
-                  className="px-3 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl flex items-center gap-2 font-medium transition-colors dark:bg-red-600 dark:hover:bg-red-700"
-                >
-                  <Download size={16} /> PDF
-                </button>
-                <button
-                  onClick={handlePrint}
-                  className="px-3 py-2.5 bg-gray-600 hover:bg-gray-700 text-white rounded-xl flex items-center gap-2 font-medium transition-colors dark:bg-gray-700 dark:hover:bg-gray-800"
-                >
-                  <Printer size={16} /> Print
-                </button>
-              </div>
-            </div>
-
-            {/* Invoice header: customer / salesman */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <div>
-                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                  Customer
+                <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                  Customer Name *
                 </label>
                 <input
-                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
+                  type="text"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Customer name"
+                  placeholder="Enter customer name"
+                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
                 />
               </div>
 
               <div>
-                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                  Salesman
+                <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                  Customer Phone
                 </label>
                 <input
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="Enter phone number"
                   className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
-                  value={salesman}
-                  onChange={(e) => setSalesman(e.target.value)}
-                  placeholder="Salesman"
                 />
               </div>
 
-              <div className="flex items-end justify-end">
-                <button
-                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-300"
-                  onClick={addBlankRow}
-                >
-                  + Blank Row
-                </button>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                  Salesperson Name *
+                </label>
+                <input
+                  type="text"
+                  value={salespersonName}
+                  onChange={(e) => setSalespersonName(e.target.value)}
+                  placeholder="Enter salesperson name"
+                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
+                />
               </div>
             </div>
 
-            {/* 1) Branch stock selector */}
+            {/* Action Buttons */}
+            <div className="flex flex-wrap gap-2 mb-6">
+              <button
+                onClick={loadLastInvoice}
+                className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <ShoppingCart size={16} /> Last Bill
+              </button>
+              <button
+                onClick={exportToExcel}
+                className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Download size={16} /> Excel
+              </button>
+              <button
+                onClick={exportToPDF}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Download size={16} /> PDF
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Printer size={16} /> Print
+              </button>
+              {billItems.length > 0 && (
+                <button
+                  onClick={async () => {
+                    if (window.confirm("Are you sure you want to clear the current bill?")) {
+                      setBillItems([]);
+                      setCustomerName("");
+                      setCustomerPhone("");
+                      setSalespersonName("");
+                      clearBill();
+                      await loadBranchStock();
+                      toast.success("Bill cleared");
+                    }
+                  }}
+                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <Trash2 size={16} /> Clear Bill
+                </button>
+              )}
+            </div>
+
+            {/* Barcode Scanner */}
             <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-gray-800 dark:text-white/90">
-                  Branch Stock ({selectedBranch})
-                </h3>
-                <button
-                  className="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl flex items-center gap-2 font-medium transition-colors"
-                  onClick={addSelectedStockToBill}
-                >
-                  <PlusCircle size={16} /> Add Selected to Bill
-                </button>
-              </div>
-
-              <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-white/5">
-                    <tr>
-                      <th className="px-3 py-3 w-8 text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800"></th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Label</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Product</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Category</th>
-                      <th className="px-3 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Weight (g)</th>
-                      <th className="px-3 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Purity</th>
-                      <th className="px-3 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Base / Type</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Mode</th>
-                      <th className="px-3 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockLoading && (
-                      <tr>
-                        <td
-                          colSpan={9}
-                          className="py-4 text-center text-gray-500"
-                        >
-                          Loading stock...
-                        </td>
-                      </tr>
-                    )}
-
-                    {!stockLoading &&
-                      branchStock.map((item) => (
-                        <tr
-                          key={item.id}
-                          className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
-                        >
-                          <td className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              checked={!!(item.id && stockSelected[item.id])}
-                              onChange={() => toggleStockSelect(item.id!)}
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-gray-800 dark:text-white/90 font-medium">{item.label}</td>
-                          <td className="px-3 py-2 text-gray-800 dark:text-white/90">
-                            {item.productName || "-"}
-                          </td>
-                          <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{item.category || "-"}</td>
-                          <td className="px-3 py-2 text-right text-gray-800 dark:text-white/90">
-                            {item.weightG || item.weight || "-"}
-                          </td>
-                          <td className="px-3 py-2 text-right text-gray-800 dark:text-white/90">
-                            {item.purity || "-"}
-                          </td>
-                          <td className="px-3 py-2 text-right text-gray-800 dark:text-white/90">
-                            ₹
-                            {(
-                              item.typeAmount ||
-                              item.basePrice ||
-                              item.costPrice ||
-                              0
-                            ).toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2 text-left">
-                            {item.pricingMode || "type"}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            {item.status || "in-branch"}
-                          </td>
-                        </tr>
-                      ))}
-
-                    {!stockLoading && branchStock.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={9}
-                          className="py-4 text-center text-gray-500"
-                        >
-                          No stock available in this branch.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                🔍 Scan Item Barcode
+              </label>
+              <BarcodeScanner
+                onScan={handleBarcodeScan}
+                placeholder="Scan barcode to add item to bill..."
+                disabled={loading}
+              />
             </div>
 
-            {/* 2) Bill table */}
-            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-white/[0.03]">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Sr No</th>
-                    <th className="px-3 py-2 text-left">Label</th>
-                    <th className="px-3 py-2 text-left">Location</th>
-                    <th className="px-3 py-2 text-right">Type / Base (₹)</th>
-                    <th className="px-3 py-2 text-right">Mode</th>
-                    <th className="px-3 py-2 text-right">Weight (g)</th>
-                    <th className="px-3 py-2 text-right">Gold Rate</th>
-                    <th className="px-3 py-2 text-right">Making (₹)</th>
-                    <th className="px-3 py-2 text-right">Profit %</th>
-                    <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">Price (₹)</th>
-                    <th className="px-3 py-2 text-right">Discount (₹)</th>
-                    <th className="px-3 py-2 text-right">Taxable (₹)</th>
-                    <th className="px-3 py-2 text-center">Remove</th>
+            {/* Bill Items Table */}
+            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 mb-6">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-white/5">
+                  <tr className="text-left font-semibold text-gray-700 dark:text-gray-300">
+                    <th className="p-3">Sr No</th>
+                    <th className="p-3">Item Name</th>
+                    <th className="p-3">Barcode</th>
+                    <th className="p-3">Loct</th>
+                    <th className="p-3">Pcs</th>
+                    <th className="p-3">Weight</th>
+                    <th className="p-3">Type</th>
+                    <th className="p-3">Rate</th>
+                    <th className="p-3">Discount</th>
+                    <th className="p-3">Taxable Value</th>
+                    <th className="p-3"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, idx) => (
+                  {billItems.map((item, idx) => (
                     <tr
-                      key={r.id}
-                      className="border-t border-gray-100 dark:border-gray-800"
+                      key={item.id}
+                      className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
                     >
-                      <td className="px-3 py-2">{idx + 1}</td>
-
-                      <td className="px-3 py-2">
-                        <input
-                          value={r.label}
-                          onChange={(e) =>
-                            updateRowField(r.id, "label", e.target.value)
-                          }
-                          className="input-style w-full"
-                        />
+                      <td className="p-3">{idx + 1}</td>
+                      <td className="p-3 font-medium">{item.category}</td>
+                      <td className="p-3 font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                        {item.barcode}
                       </td>
-
-                      <td className="px-3 py-2">
-                        {BRANCH_CODE_MAP[r.branch] || r.branch}
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
+                      <td className="p-3 text-gray-500">{item.location}</td>
+                      <td className="p-3">1</td>
+                      <td className="p-3">{item.weight}</td>
+                      <td className="p-3">{item.type}</td>
+                      <td className="p-3">
                         <input
                           type="number"
-                          value={r.typeAmount}
+                          value={item.sellingPrice}
                           onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "typeAmount",
-                              Number(e.target.value) || 0
-                            )
+                            updateItem(item.id, "sellingPrice", Number(e.target.value))
                           }
-                          className="input-style w-24 text-right"
+                          className="w-24 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                          min="0"
                         />
                       </td>
-
-                      <td className="px-3 py-2 text-right">
-                        <select
-                          value={r.pricingMode}
-                          onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "pricingMode",
-                              e.target.value as "weight" | "type"
-                            )
-                          }
-                          className="input-style w-24 text-right"
-                        >
-                          <option value="type">Type</option>
-                          <option value="weight">Weight</option>
-                        </select>
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
+                      <td className="p-3">
                         <input
                           type="number"
-                          value={r.weightG}
+                          value={item.discount}
                           onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "weightG",
-                              Number(e.target.value) || 0
-                            )
+                            updateItem(item.id, "discount", Number(e.target.value))
                           }
-                          className="input-style w-20 text-right"
+                          className="w-20 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                          min="0"
+                          max={item.sellingPrice}
                         />
                       </td>
-
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          value={r.goldRate}
-                          onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "goldRate",
-                              Number(e.target.value) || 0
-                            )
-                          }
-                          className="input-style w-24 text-right"
-                        />
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          value={r.making}
-                          onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "making",
-                              Number(e.target.value) || 0
-                            )
-                          }
-                          className="input-style w-24 text-right"
-                        />
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          value={r.profitPercent}
-                          onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "profitPercent",
-                              Number(e.target.value) || 0
-                            )
-                          }
-                          className="input-style w-20 text-right"
-                        />
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          min={1}
-                          value={r.qty}
-                          onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "qty",
-                              Math.max(1, Number(e.target.value) || 1)
-                            )
-                          }
-                          className="input-style w-16 text-right"
-                        />
-                      </td>
-
-                      <td className="px-3 py-2 text-right font-semibold">
-                        ₹{r.price.toFixed(2)}
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          min={0}
-                          value={r.discount}
-                          onChange={(e) =>
-                            updateRowField(
-                              r.id,
-                              "discount",
-                              Number(e.target.value) || 0
-                            )
-                          }
-                          className="input-style w-24 text-right"
-                        />
-                      </td>
-
-                      <td className="px-3 py-2 text-right">
-                        ₹{r.taxableAmount.toFixed(2)}
-                      </td>
-
-                      <td className="px-3 py-2 text-center">
+                      <td className="p-3 font-semibold">₹{item.taxableAmount.toFixed(2)}</td>
+                      <td className="p-3">
                         <button
-                          className="text-red-500 hover:text-red-600"
-                          onClick={() => removeRow(r.id)}
+                          onClick={() => removeItem(item.id)}
+                          className="p-1 text-red-600 hover:bg-red-50 rounded dark:hover:bg-red-900/20"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -900,13 +716,11 @@ const Billing: React.FC = () => {
                     </tr>
                   ))}
 
-                  {rows.length === 0 && (
+                  {billItems.length === 0 && (
                     <tr>
-                      <td
-                        colSpan={14}
-                        className="py-6 text-center text-gray-500"
-                      >
-                        No items in bill. Select from branch stock above.
+                      <td colSpan={11} className="p-8 text-center text-gray-500">
+                        <ShoppingCart size={48} className="mx-auto mb-2 opacity-50" />
+                        <p>No items in bill. Scan barcodes to add items.</p>
                       </td>
                     </tr>
                   )}
@@ -914,164 +728,444 @@ const Billing: React.FC = () => {
               </table>
             </div>
 
-            {/* Totals section */}
-            <div className="mt-4 grid md:grid-cols-2 gap-4">
-              <div className="p-4 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03]">
-                <h3 className="font-semibold text-gray-800 dark:text-white/90">
-                  Summary
-                </h3>
-                <div className="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
-                  <div className="flex justify-between">
-                    <span>Subtotal (before discounts)</span>
-                    <span>₹{totals.subtotal.toFixed(2)}</span>
+            {/* Totals */}
+            {billItems.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div></div>
+                <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-6 border border-gray-200 dark:border-gray-800">
+                  {/* GST Type Selector */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                      GST Type
+                    </label>
+                    <select
+                      value={gstType}
+                      onChange={(e) => setGstType(e.target.value as "cgst_sgst" | "igst")}
+                      className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                    >
+                      <option value="cgst_sgst">CGST + SGST (Intra-state)</option>
+                      <option value="igst">IGST (Inter-state)</option>
+                    </select>
                   </div>
 
-                  <div className="flex justify-between">
-                    <span>Total Discount</span>
-                    <span>- ₹{totals.totalDiscount.toFixed(2)}</span>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Subtotal:</span>
+                      <span className="font-semibold">₹{totals.subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-red-600 dark:text-red-400">
+                      <span>Total Discount:</span>
+                      <span className="font-semibold">-₹{totals.totalDiscount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Taxable Amount:</span>
+                      <span className="font-semibold">₹{totals.taxable.toFixed(2)}</span>
+                    </div>
+                    
+                    {gstType === "cgst_sgst" ? (
+                      <>
+                        <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                          <span>CGST ({gstSettings?.cgst || 1.5}%):</span>
+                          <span>₹{totals.cgst.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                          <span>SGST ({gstSettings?.sgst || 1.5}%):</span>
+                          <span>₹{totals.sgst.toFixed(2)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                        <span>IGST ({gstSettings?.igst || 3}%):</span>
+                        <span>₹{totals.igst.toFixed(2)}</span>
+                      </div>
+                    )}
+                    
+                    <div className="border-t border-gray-300 dark:border-gray-700 pt-2 mt-2">
+                      <div className="flex justify-between text-lg font-bold">
+                        <span>Grand Total:</span>
+                        <span className="text-green-600 dark:text-green-400">
+                          ₹{totals.grandTotal.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex justify-between">
-                    <span>Taxable Amount</span>
-                    <span>₹{totals.taxable.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between">
-                    <span>CGST ({(GST_RATE / 2).toFixed(2)}%)</span>
-                    <span>₹{totals.cgst.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between">
-                    <span>SGST ({(GST_RATE / 2).toFixed(2)}%)</span>
-                    <span>₹{totals.sgst.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between font-bold text-lg mt-2">
-                    <span>Grand Total</span>
-                    <span className="text-green-600">
-                      ₹{totals.grandTotal.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03]">
-                <h3 className="font-semibold text-gray-800 dark:text-white/90">
-                  Actions
-                </h3>
-                <div className="mt-3 flex flex-col gap-2">
                   <button
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl"
                     onClick={handleSaveInvoice}
+                    className="w-full mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={billItems.length === 0 || !customerName.trim() || !salespersonName.trim()}
+                    type="button"
                   >
-                    Save Invoice
-                  </button>
-
-                  <button
-                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl"
-                    onClick={() => {
-                      if (!window.confirm("Reset invoice?")) return;
-                      setCustomerName("");
-                      setSalesman("");
-                      setRows([]);
-                    }}
-                  >
-                    Reset Invoice
+                    {billItems.length === 0 
+                      ? "Add items to bill" 
+                      : !customerName.trim() 
+                      ? "Enter customer name" 
+                      : !salespersonName.trim()
+                      ? "Enter salesperson name"
+                      : "Save Invoice & Complete Sale"}
                   </button>
                 </div>
-              </div>
-            </div>
-          </TASection>
-        </div>
-      </div>
-
-      {/* Print-only Invoice */}
-      {rows.length > 0 && (
-        <div className="hidden print:block print-invoice">
-          <div className="p-8">
-            <div className="text-center mb-6">
-              <h1 className="text-3xl font-bold">SALES INVOICE</h1>
-              <p className="text-sm text-gray-600 mt-2">Branch: {selectedBranch}</p>
-              <p className="text-sm text-gray-600">Date: {new Date().toLocaleDateString()}</p>
-            </div>
-
-            {(customerName || salesman) && (
-              <div className="mb-6 grid grid-cols-2 gap-4">
-                {customerName && (
-                  <div>
-                    <p className="text-sm font-semibold">Customer:</p>
-                    <p>{customerName}</p>
-                  </div>
-                )}
-                {salesman && (
-                  <div>
-                    <p className="text-sm font-semibold">Salesman:</p>
-                    <p>{salesman}</p>
-                  </div>
-                )}
               </div>
             )}
 
-            <table className="w-full border-collapse border border-gray-300 mb-6">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="border border-gray-300 p-2 text-left">#</th>
-                  <th className="border border-gray-300 p-2 text-left">Label</th>
-                  <th className="border border-gray-300 p-2 text-left">Product</th>
-                  <th className="border border-gray-300 p-2 text-right">Qty</th>
-                  <th className="border border-gray-300 p-2 text-right">Price</th>
-                  <th className="border border-gray-300 p-2 text-right">Discount</th>
-                  <th className="border border-gray-300 p-2 text-right">Taxable</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={row.id}>
-                    <td className="border border-gray-300 p-2">{idx + 1}</td>
-                    <td className="border border-gray-300 p-2">{row.label}</td>
-                    <td className="border border-gray-300 p-2">{row.productName || "-"}</td>
-                    <td className="border border-gray-300 p-2 text-right">{row.qty}</td>
-                    <td className="border border-gray-300 p-2 text-right">₹{row.price.toFixed(2)}</td>
-                    <td className="border border-gray-300 p-2 text-right">₹{row.discount.toFixed(2)}</td>
-                    <td className="border border-gray-300 p-2 text-right">₹{row.taxableAmount.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {/* Last Invoice History */}
+            {showHistory && lastInvoice && (
+              <div className="mt-6 p-6 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-purple-900 dark:text-purple-300">
+                    📜 Last Invoice
+                  </h3>
+                  <button
+                    onClick={() => setShowHistory(false)}
+                    className="text-purple-600 hover:text-purple-800 dark:text-purple-400"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
 
-            <div className="flex justify-end">
-              <div className="w-64">
-                <div className="flex justify-between py-1">
-                  <span>Subtotal:</span>
-                  <span>₹{totals.subtotal.toFixed(2)}</span>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Invoice ID:</span>
+                    <p className="font-semibold">{lastInvoice.invoiceId}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Customer:</span>
+                    <p className="font-semibold">{lastInvoice.customerName}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Salesperson:</span>
+                    <p className="font-semibold">{lastInvoice.salespersonName}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600 dark:text-gray-400">Date:</span>
+                    <p className="font-semibold">
+                      {new Date(lastInvoice.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex justify-between py-1">
-                  <span>Discount:</span>
-                  <span>₹{totals.totalDiscount.toFixed(2)}</span>
+
+                <div className="overflow-x-auto rounded-lg border border-purple-200 dark:border-purple-800">
+                  <table className="w-full text-sm">
+                    <thead className="bg-purple-100 dark:bg-purple-900/40">
+                      <tr className="text-left">
+                        <th className="p-2">#</th>
+                        <th className="p-2">Item</th>
+                        <th className="p-2">Type</th>
+                        <th className="p-2">Barcode</th>
+                        <th className="p-2">Weight</th>
+                        <th className="p-2">Rate</th>
+                        <th className="p-2">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lastInvoice.items?.map((item: any, idx: number) => (
+                        <tr key={idx} className="border-b border-purple-200 dark:border-purple-800">
+                          <td className="p-2">{idx + 1}</td>
+                          <td className="p-2">{item.category}</td>
+                          <td className="p-2">{item.type}</td>
+                          <td className="p-2 font-mono text-xs">{item.barcode}</td>
+                          <td className="p-2">{item.weight}</td>
+                          <td className="p-2">₹{item.sellingPrice}</td>
+                          <td className="p-2 font-semibold">₹{item.taxableAmount.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="flex justify-between py-1">
-                  <span>Taxable:</span>
-                  <span>₹{totals.taxable.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span>CGST ({(GST_RATE / 2)}%):</span>
-                  <span>₹{totals.cgst.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span>SGST ({(GST_RATE / 2)}%):</span>
-                  <span>₹{totals.sgst.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between py-2 border-t-2 border-gray-800 mt-2 font-bold text-lg">
-                  <span>Grand Total:</span>
-                  <span>₹{totals.grandTotal.toFixed(2)}</span>
+
+                <div className="mt-4 text-right">
+                  <p className="text-lg font-bold text-purple-900 dark:text-purple-300">
+                    Grand Total: ₹{lastInvoice.totals?.grandTotal.toFixed(2)}
+                  </p>
                 </div>
               </div>
+            )}
+          </TASection>
+        </div>
+      </div>
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .print-invoice, .print-invoice * {
+            visibility: visible;
+          }
+          .print-invoice {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            padding: 20px;
+          }
+          .no-print {
+            display: none !important;
+          }
+          
+          /* Professional invoice styling */
+          .print-invoice {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+          }
+          
+          .print-header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+          }
+          
+          .print-header h1 {
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0 0 5px 0;
+          }
+          
+          .print-header p {
+            margin: 2px 0;
+            font-size: 11px;
+          }
+          
+          .print-section {
+            margin-bottom: 15px;
+          }
+          
+          .print-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+          }
+          
+          .print-table th,
+          .print-table td {
+            border: 1px solid #000;
+            padding: 5px;
+            text-align: left;
+            font-size: 11px;
+          }
+          
+          .print-table th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+          }
+          
+          .print-table td.text-right {
+            text-align: right;
+          }
+          
+          .print-totals {
+            margin-top: 10px;
+            float: right;
+            width: 300px;
+          }
+          
+          .print-totals table {
+            width: 100%;
+          }
+          
+          .print-totals td {
+            padding: 3px 5px;
+            border: none;
+          }
+          
+          .print-totals .total-row {
+            border-top: 2px solid #000;
+            font-weight: bold;
+            font-size: 13px;
+          }
+          
+          .print-footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #000;
+          }
+          
+          .print-signature {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 40px;
+          }
+          
+          .print-signature div {
+            text-align: center;
+            width: 200px;
+          }
+        }
+      `}</style>
+
+      {/* Print-Ready Invoice (Hidden on screen, visible on print) - EXACT FORMAT FROM IMAGE */}
+      {billItems.length > 0 && (
+        <div className="print-invoice" style={{ display: "none" }}>
+          {/* Top Header - Company Info from Settings */}
+          <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: "10px", marginBottom: "10px" }}>
+            <h1 style={{ fontSize: "18px", fontWeight: "bold", margin: "0 0 5px 0", textTransform: "uppercase" }}>
+              {companySettings?.companyName || "JEWELRY STORE"}
+            </h1>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>
+              {companySettings?.companyAddress || "Store Address"}
+            </p>
+            <p style={{ margin: "2px 0", fontSize: "10px" }}>
+              Phone: {companySettings?.companyPhone || "Phone Number"}
+            </p>
+            <p style={{ margin: "2px 0", fontSize: "10px", fontWeight: "bold" }}>
+              GSTIN: {companySettings?.companyGSTIN || "GSTIN Number"}
+            </p>
+            <p style={{ margin: "5px 0 0 0", fontSize: "11px", fontWeight: "bold" }}>
+              Sales Book - 1 <span style={{ float: "right" }}>ORIGINAL</span>
+            </p>
+          </div>
+
+          {/* Bill Details Row */}
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px", fontSize: "10px" }}>
+            <div>
+              <p style={{ margin: "2px 0" }}><strong>Bill No:</strong> {Date.now().toString().slice(-6)}</p>
+              <p style={{ margin: "2px 0" }}><strong>Bill Date:</strong> {new Date().toLocaleDateString('en-GB')}</p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ margin: "2px 0" }}><strong>Shop:</strong> {selectedBranch}</p>
+            </div>
+          </div>
+
+          {/* Party & Staff Details */}
+          <div style={{ marginBottom: "10px", fontSize: "10px", border: "1px solid #000", padding: "5px" }}>
+            <p style={{ margin: "2px 0" }}><strong>Party Name:</strong> {customerName}</p>
+            <p style={{ margin: "2px 0" }}><strong>Mo:</strong> {customerPhone || "N/A"}</p>
+            <p style={{ margin: "2px 0" }}><strong>Emp Name:</strong> {salespersonName}</p>
+          </div>
+
+          {/* Items Table - EXACT FORMAT FROM IMAGE */}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9px", marginBottom: "10px" }}>
+            <thead>
+              <tr style={{ borderTop: "1px solid #000", borderBottom: "1px solid #000" }}>
+                <th style={{ padding: "3px", textAlign: "left", width: "25px" }}>SNO</th>
+                <th style={{ padding: "3px", textAlign: "left" }}>Item Name</th>
+                <th style={{ padding: "3px", textAlign: "center", width: "70px" }}>HSN Code</th>
+                <th style={{ padding: "3px", textAlign: "left", width: "60px" }}>Remark</th>
+                <th style={{ padding: "3px", textAlign: "center", width: "35px" }}>Loct</th>
+                <th style={{ padding: "3px", textAlign: "center", width: "30px" }}>Pcs</th>
+                <th style={{ padding: "3px", textAlign: "right", width: "50px" }}>Weight</th>
+                <th style={{ padding: "3px", textAlign: "center", width: "40px" }}>Type</th>
+                <th style={{ padding: "3px", textAlign: "right", width: "60px" }}>Rate</th>
+                <th style={{ padding: "3px", textAlign: "right", width: "50px" }}>Disc</th>
+                <th style={{ padding: "3px", textAlign: "right", width: "70px" }}>Taxable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {billItems.map((item, idx) => (
+                <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
+                  <td style={{ padding: "3px" }}>{idx + 1}</td>
+                  <td style={{ padding: "3px" }}>{item.category}</td>
+                  <td style={{ padding: "3px", textAlign: "center" }}>7103</td>
+                  <td style={{ padding: "3px" }}>{item.subcategory || "-"}</td>
+                  <td style={{ padding: "3px", textAlign: "center" }}>{item.location}</td>
+                  <td style={{ padding: "3px", textAlign: "center" }}>1</td>
+                  <td style={{ padding: "3px", textAlign: "right" }}>{item.weight}</td>
+                  <td style={{ padding: "3px", textAlign: "center" }}>{item.type}</td>
+                  <td style={{ padding: "3px", textAlign: "right" }}>{item.sellingPrice.toFixed(2)}</td>
+                  <td style={{ padding: "3px", textAlign: "right" }}>{item.discount.toFixed(2)}</td>
+                  <td style={{ padding: "3px", textAlign: "right" }}>{item.taxableAmount.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Bottom Section - GST Summary & Payment */}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "9px" }}>
+            {/* Left Side - Amount in Words */}
+            <div style={{ width: "60%", paddingRight: "10px" }}>
+              <p style={{ margin: "5px 0", fontWeight: "bold" }}>
+                Rupees: {numberToWords(totals.grandTotal)}
+              </p>
+              <div style={{ marginTop: "30px", fontSize: "8px" }}>
+                <p style={{ margin: "2px 0" }}><strong>GST No:</strong> {companySettings?.companyGSTIN || "GSTIN"}</p>
+                <p style={{ margin: "2px 0" }}><strong>State:</strong> Maharashtra</p>
+              </div>
+            </div>
+
+            {/* Right Side - Totals */}
+            <div style={{ width: "40%", border: "1px solid #000" }}>
+              <table style={{ width: "100%", fontSize: "9px" }}>
+                <tbody>
+                  <tr style={{ borderBottom: "1px solid #ddd" }}>
+                    <td style={{ padding: "3px" }}>Net Amount:</td>
+                    <td style={{ padding: "3px", textAlign: "right" }}>{totals.taxable.toFixed(2)}</td>
+                  </tr>
+                  {gstType === "cgst_sgst" ? (
+                    <>
+                      <tr style={{ borderBottom: "1px solid #ddd" }}>
+                        <td style={{ padding: "3px" }}>CGST {gstSettings?.cgst || 1.5}%:</td>
+                        <td style={{ padding: "3px", textAlign: "right" }}>{totals.cgst.toFixed(2)}</td>
+                      </tr>
+                      <tr style={{ borderBottom: "1px solid #ddd" }}>
+                        <td style={{ padding: "3px" }}>SGST {gstSettings?.sgst || 1.5}%:</td>
+                        <td style={{ padding: "3px", textAlign: "right" }}>{totals.sgst.toFixed(2)}</td>
+                      </tr>
+                    </>
+                  ) : (
+                    <tr style={{ borderBottom: "1px solid #ddd" }}>
+                      <td style={{ padding: "3px" }}>IGST {gstSettings?.igst || 3}%:</td>
+                      <td style={{ padding: "3px", textAlign: "right" }}>{totals.igst.toFixed(2)}</td>
+                    </tr>
+                  )}
+                  <tr style={{ borderBottom: "1px solid #ddd" }}>
+                    <td style={{ padding: "3px", fontWeight: "bold" }}>Bill Amount:</td>
+                    <td style={{ padding: "3px", textAlign: "right", fontWeight: "bold" }}>{totals.grandTotal.toFixed(2)}</td>
+                  </tr>
+                  <tr style={{ borderBottom: "1px solid #ddd" }}>
+                    <td style={{ padding: "3px" }}>Cash Received:</td>
+                    <td style={{ padding: "3px", textAlign: "right" }}>{totals.grandTotal.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "3px" }}>Outstanding:</td>
+                    <td style={{ padding: "3px", textAlign: "right" }}>0.00</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Footer - Signature */}
+          <div style={{ marginTop: "40px", textAlign: "right", fontSize: "10px" }}>
+            <p style={{ margin: "0" }}>For {companySettings?.companyName || "JEWELRY STORE"}</p>
+            <div style={{ marginTop: "30px", borderTop: "1px solid #000", width: "150px", marginLeft: "auto" }}>
+              <p style={{ margin: "5px 0 0 0" }}>Authorized Signatory</p>
             </div>
           </div>
         </div>
       )}
+
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          
+          .print-invoice, .print-invoice * {
+            visibility: visible;
+          }
+          
+          .print-invoice {
+            display: block !important;
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            padding: 15mm;
+          }
+          
+          .no-print {
+            display: none !important;
+          }
+          
+          @page {
+            size: A4;
+            margin: 10mm;
+          }
+        }
+      `}</style>
     </>
   );
-};
-
-export default Billing;
+}

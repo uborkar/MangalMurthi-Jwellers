@@ -1,19 +1,17 @@
-// src/pages/Warehouse/Tagging.tsx
+// src/pages/Warehouse/Tagging.tsx - ERP-CORRECT VERSION
 import { useState, useRef, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
 import { Trash2, Printer, CheckSquare, Square } from "lucide-react";
 import { useCategories } from "../../hooks/useCategories";
+import { useLocations } from "../../hooks/useLocations";
 
 import { reserveSerials } from "../../firebase/serials";
 import BarcodeView from "../../components/common/BarcodeView";
 import { makeBarcodeValue, CATEGORY_CODES, LOCATION_CODES } from "../../utils/barcode";
 
-import { collection, writeBatch, doc } from "firebase/firestore";
-import { db } from "../../firebase/config";
-
-const firestore = db;
+import { batchAddWarehouseItems, markItemsPrinted, getItemByBarcode } from "../../firebase/warehouseItems";
 
 // --------------------------------------------------------------------------------------
 // Interfaces
@@ -24,16 +22,16 @@ interface GridItem {
   barcodeValue: string;
   isCommitted?: boolean;
   isSelected?: boolean;
+  isPrinted?: boolean; // UI-only flag, NOT a business status
 }
-
-const locations = ["Mumbai Malad", "Pune", "Sangli"];
 
 // --------------------------------------------------------------------------------------
 // Main Component
 // --------------------------------------------------------------------------------------
 export default function Tagging() {
-  // Dynamic Categories
+  // Dynamic Categories and Locations
   const { categories, loading: categoriesLoading } = useCategories();
+  const { locations, loading: locationsLoading } = useLocations();
 
   // Batch Inputs
   const [category, setCategory] = useState("");
@@ -41,7 +39,10 @@ export default function Tagging() {
   const [type, setType] = useState(""); // Cost Price Type
   const [design, setDesign] = useState("");
   const [remark, setRemark] = useState("");
-  const [location, setLocation] = useState(locations[0]);
+  const [location, setLocation] = useState("");
+
+  // Form lock state (after batch generation)
+  const [formLocked, setFormLocked] = useState(false);
 
   // Generated Items
   const [grid, setGrid] = useState<GridItem[]>([]);
@@ -52,12 +53,15 @@ export default function Tagging() {
   const [reserving, setReserving] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Set default category when categories load
+  // Set default category and location when they load
   useEffect(() => {
     if (categories.length > 0 && !category) {
       setCategory(categories[0].name);
     }
-  }, [categories, category]);
+    if (locations.length > 0 && !location) {
+      setLocation(locations[0].name);
+    }
+  }, [categories, category, locations, location]);
 
   // --------------------------------------------------------------------------------------
   // Reserve Serials + Generate Batch
@@ -76,11 +80,12 @@ export default function Tagging() {
       const yy = new Date().getFullYear();
       const counterKey = `MG-${catCode}-${String(yy).slice(-2)}`;
 
-      // Reserve serials from category-specific counter
-      const { start, end } = await reserveSerials(counterKey, quantity);
+      // Reserve serials from category-specific counter (with gap filling)
+      const { start, end, serials } = await reserveSerials(counterKey, quantity);
 
       const rows: GridItem[] = [];
-      for (let s = start; s <= end; s++) {
+      // Use the actual serials array (which may include gaps)
+      for (const s of serials) {
         const barcodeValue = makeBarcodeValue("MG", catCode, locCode, yy, s);
         rows.push({
           id: crypto.randomUUID(),
@@ -91,11 +96,20 @@ export default function Tagging() {
       }
 
       setGrid(rows);
-      toast.success(
-        `✅ Generated ${quantity} ${category} tags (Serial: ${start}-${end})\n` +
-        `Counter: ${counterKey}`,
-        { duration: 4000 }
-      );
+      
+      // LOCK FORM after successful generation
+      setFormLocked(true);
+      
+      // Show message about gap filling if applicable
+      const hasGaps = serials.length > 0 && (serials[serials.length - 1] - serials[0] + 1) > serials.length;
+      const message = hasGaps
+        ? `✅ Generated ${quantity} ${category} tags (Serials: ${serials.join(', ')})\n` +
+          `♻️ Reused deleted serial numbers\n` +
+          `Counter: ${counterKey}`
+        : `✅ Generated ${quantity} ${category} tags (Serial: ${start}-${end})\n` +
+          `Counter: ${counterKey}`;
+      
+      toast.success(message, { duration: 4000 });
     } catch (error) {
       console.error(error);
       toast.error("Failed to generate tags");
@@ -131,12 +145,19 @@ export default function Tagging() {
   };
 
   // --------------------------------------------------------------------------------------
-  // Print Workflow
+  // Print Workflow - Updates DB status to "printed"
   // --------------------------------------------------------------------------------------
-  const printSelected = () => {
-    const selectedItems = grid.filter((item) => item.isSelected);
+  const printSelected = async () => {
+    const selectedItems = grid.filter((item) => item.isSelected && !item.isPrinted);
     if (selectedItems.length === 0) {
       return toast.error("Please select items to print");
+    }
+
+    // Check if items are saved to database
+    const unsavedItems = selectedItems.filter(item => !item.isCommitted);
+    if (unsavedItems.length > 0) {
+      toast.error(`Please save ${unsavedItems.length} items before printing`, { duration: 4000 });
+      return;
     }
 
     const printData = selectedItems.map((item) => ({
@@ -150,65 +171,81 @@ export default function Tagging() {
     }));
 
     localStorage.setItem("print_barcodes", JSON.stringify(printData));
-    window.open("/print-barcodes", "_blank");
+    localStorage.setItem("print_item_barcodes", JSON.stringify(selectedItems.map(i => i.barcodeValue)));
+    
+    const printWindow = window.open("/print-barcodes", "_blank");
+    
+    if (!printWindow) {
+      toast.error("Please allow pop-ups to print labels");
+      return;
+    }
+
+    // Mark items as printed in UI
+    setGrid((prev) =>
+      prev.map((item) =>
+        selectedItems.find((si) => si.id === item.id)
+          ? { ...item, isPrinted: true }
+          : item
+      )
+    );
+
+    // Update database status to "printed"
+    try {
+      // Get item IDs from database by barcode
+      const itemIds: string[] = [];
+      for (const item of selectedItems) {
+        const dbItem = await getItemByBarcode(item.barcodeValue);
+        if (dbItem?.id) {
+          itemIds.push(dbItem.id);
+        }
+      }
+
+      if (itemIds.length > 0) {
+        await markItemsPrinted(itemIds);
+        console.log(`✅ Marked ${itemIds.length} items as printed in database`);
+      }
+    } catch (error) {
+      console.error("Error updating print status:", error);
+      // Don't show error to user - print window already opened
+    }
+
+    toast.success(`Opening print window for ${selectedItems.length} items`, { duration: 3000 });
   };
 
   // --------------------------------------------------------------------------------------
-  // Save Batch to Firestore (warehouse/tagged_items/items)
+  // Save Batch to Firestore - ALWAYS status = "tagged"
   // --------------------------------------------------------------------------------------
   const saveBatch = async () => {
     const toSave = gridRef.current.filter((i) => !i.isCommitted);
     if (toSave.length === 0) return toast.error("Nothing to save");
 
     setSaving(true);
-    const batch = writeBatch(firestore);
 
     try {
-      // Correct path: warehouse/tagged_items/items
-      const colRef = collection(firestore, "warehouse", "tagged_items", "items");
+      const catCode = CATEGORY_CODES[category] ?? "UNK";
+      const locCode = LOCATION_CODES[location] ?? "LOC";
+      const year = new Date().getFullYear();
 
-      toSave.forEach((item) => {
-        const newDoc = doc(colRef);
+      // Prepare items for batch save - SIMPLE FLAT STRUCTURE
+      const itemsToSave = toSave.map((item) => ({
+        barcode: item.barcodeValue,
+        serial: item.serial,
+        category: category,
+        subcategory: design,
+        categoryCode: catCode,
+        location: location,
+        locationCode: locCode,
+        weight: "",
+        costPrice: 0,
+        costPriceType: type,
+        remark: remark,
+        year: year,
+        taggedAt: new Date().toISOString(),
+        status: "tagged" as const,
+      }));
 
-        batch.set(newDoc, {
-          // Barcode as label (primary identifier)
-          label: item.barcodeValue,
-          
-          // Category information (PRIMARY: itemType becomes category)
-          category: category, // Ring, Necklace, Bracelet, etc. - PRIMARY CATEGORY
-          subcategory: design, // Design/Pattern (e.g., FLORAL)
-          
-          // Location
-          location,
-          
-          // Additional fields
-          weight: "", // Empty for now, can be filled later
-          purity: "Gold Forming", // Default purity
-          price: 0, // Price to be added later
-          
-          // Serial and metadata
-          serial: item.serial,
-          stockRefId: null,
-          status: "pending",
-          
-          // Audit fields
-          createdAt: new Date().toISOString(),
-          
-          // Extra metadata for tracking
-          barcodeValue: item.barcodeValue,
-          categoryCode: CATEGORY_CODES[category] ?? "UNK",
-          locationCode: LOCATION_CODES[location] ?? "LOC",
-          costPriceType: type, // CP-A, CP-B, etc.
-          remark, // Item name/description
-          year: new Date().getFullYear(),
-          
-          // Print tracking
-          printed: false,
-          printedAt: null,
-        });
-      });
-
-      await batch.commit();
+      // Batch save to FLAT collection: warehouseItems
+      const savedCount = await batchAddWarehouseItems(itemsToSave);
 
       setGrid((prev) =>
         prev.map((r) => ({
@@ -217,10 +254,10 @@ export default function Tagging() {
         }))
       );
 
-      toast.success(`🎉 Successfully saved ${toSave.length} items to warehouse!`);
-    } catch (error) {
+      toast.success(`🎉 Successfully saved ${savedCount} items to warehouse!`);
+    } catch (error: any) {
       console.error(error);
-      toast.error("Failed to save batch");
+      toast.error(`Failed to save batch: ${error.message || 'Unknown error'}`);
     }
 
     setSaving(false);
@@ -239,19 +276,6 @@ export default function Tagging() {
             title="🏷️ Batch Tagging & Barcode Generation"
             subtitle="Industry-standard barcode tagging for jewellery items"
           >
-            {/* Info Banner - Category-wise Serial Tracking */}
-            {/* <div className="mb-5 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
-              <h3 className="font-semibold text-blue-800 dark:text-blue-400 mb-2">📊 Category-Wise Serial Tracking</h3>
-              <p className="text-sm text-blue-800 dark:text-blue-300">
-                Each category (Ring, Necklace, Bracelet, etc.) maintains its own independent serial counter. 
-                Example: If Ring ends at serial 20, the next Ring batch will start at 21, but Necklace will start from 1 (or continue from its last count).
-              </p>
-              <p className="text-xs text-blue-700 dark:text-blue-400 mt-2">
-                💡 Counter Pattern: <code className="bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded">MG-{"{CATEGORY_CODE}"}-{"{YEAR}"}</code> 
-                (e.g., MG-RNG-25 for Rings in 2025)
-              </p>
-            </div> */}
-
             {/* Batch Input Form */}
             <div className="p-5 rounded-xl border border-gray-300 bg-white dark:bg-gray-900 mb-5">
               <h3 className="font-bold mb-3">Batch Details</h3>
@@ -262,8 +286,8 @@ export default function Tagging() {
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
-                    disabled={categoriesLoading}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={categoriesLoading || formLocked}
                   >
                     {categoriesLoading ? (
                       <option>Loading...</option>
@@ -276,23 +300,31 @@ export default function Tagging() {
                 </div>
 
                 <div>
-                  <label className="text-sm block mb-1 font-medium">Quantity</label>
-                  <input
-                    type="number"
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                  />
+                  <label className="text-sm block mb-1 font-medium">Location</label>
+                  <select
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={locationsLoading || formLocked}
+                  >
+                    {locationsLoading ? (
+                      <option>Loading...</option>
+                    ) : (
+                      locations.map((l) => (
+                        <option key={l.id} value={l.name}>{l.name}</option>
+                      ))
+                    )}
+                  </select>
                 </div>
 
                 <div>
-                  <label className="text-sm block mb-1 font-medium">Type</label>
+                  <label className="text-sm block mb-1 font-medium">Quantity</label>
                   <input
-                    type="text"
-                    value={type}
-                    onChange={(e) => setType(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
-                    placeholder="e.g. CP-A"
+                    type="number"
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    value={quantity}
+                    onChange={(e) => setQuantity(Number(e.target.value))}
+                    disabled={formLocked}
                   />
                 </div>
 
@@ -302,8 +334,21 @@ export default function Tagging() {
                     type="text"
                     value={design}
                     onChange={(e) => setDesign(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="e.g. FLORAL"
+                    disabled={formLocked}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm block mb-1 font-medium">Type</label>
+                  <input
+                    type="text"
+                    value={type}
+                    onChange={(e) => setType(e.target.value)}
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="e.g. CP-A"
+                    disabled={formLocked}
                   />
                 </div>
 
@@ -313,32 +358,29 @@ export default function Tagging() {
                     type="text"
                     value={remark}
                     onChange={(e) => setRemark(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
+                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="e.g. Daily Wear Necklace"
+                    disabled={formLocked}
                   />
                 </div>
 
-                <div>
-                  <label className="text-sm block mb-1 font-medium">Location</label>
-                  <select
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
-                  >
-                    {locations.map((l) => (
-                      <option key={l}>{l}</option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
-              <button
-                className="mt-4 px-5 py-2 bg-blue-600 text-white rounded-lg"
-                onClick={handleGenerateBatch}
-                disabled={reserving}
-              >
-                {reserving ? "Generating..." : "Generate Batch"}
-              </button>
+              <div className="mt-4 flex gap-3">
+                <button
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleGenerateBatch}
+                  disabled={reserving || formLocked}
+                >
+                  {reserving ? "Generating..." : "Generate Batch"}
+                </button>
+                
+                {formLocked && (
+                  <div className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-3 py-2 rounded-lg">
+                    🔒 Form locked - Serials reserved
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Selection Controls */}
@@ -381,11 +423,13 @@ export default function Tagging() {
                 <div
                   key={item.id}
                   className={`p-4 rounded-xl border ${
-                    item.isCommitted
-                      ? "border-green-500 bg-green-50"
-                      : item.isSelected
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-300 bg-white"
+                    item.isPrinted
+                      ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
+                      : item.isCommitted
+                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                        : item.isSelected
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-gray-300 bg-white dark:bg-gray-900"
                   }`}
                 >
                   <div className="flex justify-between items-center mb-3">
@@ -398,15 +442,34 @@ export default function Tagging() {
                           className="w-5 h-5 cursor-pointer"
                         />
                       )}
-                      <h4 className="font-semibold">
-                        Item #{idx + 1} — Serial {item.serial}
-                      </h4>
+                      <div>
+                        <h4 className="font-semibold">
+                          Item #{idx + 1} — Serial {item.serial}
+                        </h4>
+                        <div className="flex gap-2 mt-1">
+                          {item.isPrinted && (
+                            <span className="text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 px-2 py-0.5 rounded font-medium">
+                              ✓ Printed
+                            </span>
+                          )}
+                          {item.isCommitted && !item.isPrinted && (
+                            <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 px-2 py-0.5 rounded font-medium">
+                              ✓ Saved
+                            </span>
+                          )}
+                          {!item.isCommitted && (
+                            <span className="text-xs bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300 px-2 py-0.5 rounded font-medium">
+                              ⚠ Not Saved
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     {!item.isCommitted && (
                       <button
                         onClick={() => removeRow(item.id)}
-                        className="p-2 bg-red-500 text-white rounded-lg"
+                        className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
                       >
                         <Trash2 size={16} />
                       </button>
@@ -430,7 +493,7 @@ export default function Tagging() {
             {/* Save Button */}
             {grid.length > 0 && (
               <button
-                className="mt-6 px-6 py-3 bg-green-600 text-white rounded-lg"
+                className="mt-6 px-6 py-3 bg-green-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={saveBatch}
                 disabled={saving}
               >

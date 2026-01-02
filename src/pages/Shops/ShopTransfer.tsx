@@ -155,7 +155,22 @@ const ShopTransfer: React.FC = () => {
       return;
     }
 
+    // Validate all rows have labels
+    const invalidRows = transferRows.filter((r) => !r.label.trim());
+    if (invalidRows.length > 0) {
+      toast.error("All items must have a label.");
+      return;
+    }
+
+    // Confirm transfer
+    const confirmMsg = `Transfer ${transferRows.length} items from ${fromShop} to ${toShop}?\n\nThis will:\n- Remove items from ${fromShop}\n- Add items to ${toShop}\n- Generate transfer challan`;
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
     setLoading(true);
+    const loadingToast = toast.loading("Processing transfer...");
+
     try {
       console.log("Initiating transfer from", fromShop, "to", toShop);
       
@@ -184,24 +199,33 @@ const ShopTransfer: React.FC = () => {
 
       console.log("Transfer successful:", log);
 
-      toast.success(`Transfer ${log.transferNo} completed!`);
+      toast.dismiss(loadingToast);
+      toast.success(`✅ Transfer ${log.transferNo} completed!`);
       
       if (log.missingLabels && log.missingLabels.length > 0) {
-        toast.error(`Missing items: ${log.missingLabels.join(", ")}`);
+        toast.error(`⚠️ Missing items: ${log.missingLabels.join(", ")}`, {
+          duration: 5000,
+        });
       }
 
+      // Open challan window
       openChallanWindow(log);
 
       // Reset form
       setTransferRows([]);
       setTransportBy("");
       setRemarks("");
+      setLabelSearch("");
+      setSelectedFoundItem(null);
       
       // Reload stock
       const updatedStock = await getShopStock(fromShop);
       setBranchStock((prev) => ({ ...prev, [fromShop]: updatedStock }));
+      
+      toast.success("Stock updated successfully!");
     } catch (error) {
       console.error("Transfer error:", error);
+      toast.dismiss(loadingToast);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       toast.error(`Failed to perform transfer: ${errorMessage}`);
     } finally {

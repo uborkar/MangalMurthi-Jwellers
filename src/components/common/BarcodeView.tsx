@@ -1,8 +1,8 @@
 // src/components/common/BarcodeView.tsx
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import JsBarcode from "jsbarcode";
 
-export default function BarcodeView({ value, height = 50, showValue = true }: { value: string, height?: number, showValue?: boolean }) {
+export default function BarcodeView({ value, height = 50, showValue = false }: { value: string, height?: number, showValue?: boolean }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
@@ -10,14 +10,15 @@ export default function BarcodeView({ value, height = 50, showValue = true }: { 
     try {
       JsBarcode(svgRef.current, value, {
          format: "CODE128",
-         displayValue: true,
-         fontSize: 10,
-         height: 35,
-         width: 0.9,     // controls bar thickness → LOWER = less wide
-         margin: 4,
+         displayValue: showValue,
+         fontSize: 5,
+         height: height,
+         width: 0.7, // Minimum scannable width - saves space while maintaining readability
+         margin: 0,
+         background: "#ffffff",
+         lineColor: "#000000",
       });
     } catch (err) {
-      // swallow render errors but log
       console.error("JsBarcode render error:", err);
     }
   }, [value, height, showValue]);

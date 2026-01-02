@@ -216,14 +216,81 @@ export async function performShopTransfer(
 }
 
 /**
- * Get all shop transfer logs
+ * Get all shop transfer logs with optional filters
  */
-export async function getShopTransferLogs(): Promise<ShopTransferLog[]> {
+export async function getShopTransferLogs(filters?: {
+  fromShop?: string;
+  toShop?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<ShopTransferLog[]> {
   const logsRef = collection(db, "warehouse", "transfers", "shopTransfers");
-  const snap = await getDocs(logsRef);
-  
-  return snap.docs.map((d) => ({
+  let q = query(logsRef);
+
+  // Apply filters if provided
+  if (filters?.fromShop) {
+    q = query(q, where("fromShop", "==", filters.fromShop));
+  }
+  if (filters?.toShop) {
+    q = query(q, where("toShop", "==", filters.toShop));
+  }
+
+  const snap = await getDocs(q);
+  let logs = snap.docs.map((d) => ({
     id: d.id,
     ...(d.data() as ShopTransferLog),
   }));
+
+  // Client-side date filtering
+  if (filters?.dateFrom || filters?.dateTo) {
+    logs = logs.filter((log) => {
+      const logDate = log.date.split("T")[0];
+      if (filters.dateFrom && logDate < filters.dateFrom) return false;
+      if (filters.dateTo && logDate > filters.dateTo) return false;
+      return true;
+    });
+  }
+
+  // Sort by date descending
+  logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return logs;
+}
+
+/**
+ * Get transfer statistics
+ */
+export interface TransferStats {
+  totalTransfers: number;
+  totalItems: number;
+  totalWeight: number;
+  byFromShop: Record<string, number>;
+  byToShop: Record<string, number>;
+  recentTransfers: ShopTransferLog[];
+}
+
+export async function getTransferStats(filters?: {
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<TransferStats> {
+  const logs = await getShopTransferLogs(filters);
+
+  const stats: TransferStats = {
+    totalTransfers: logs.length,
+    totalItems: 0,
+    totalWeight: 0,
+    byFromShop: {},
+    byToShop: {},
+    recentTransfers: logs.slice(0, 10),
+  };
+
+  logs.forEach((log) => {
+    stats.totalItems += log.totals.totalQty;
+    stats.totalWeight += parseFloat(log.totals.totalWeight || "0");
+
+    stats.byFromShop[log.fromShop] = (stats.byFromShop[log.fromShop] || 0) + 1;
+    stats.byToShop[log.toShop] = (stats.byToShop[log.toShop] || 0) + 1;
+  });
+
+  return stats;
 }

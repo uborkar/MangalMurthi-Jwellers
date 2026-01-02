@@ -26,5 +26,6 @@ export const LOCATION_CODES: Record<string,string> = {
   "Mumbai Malad": "MAL",
   "Pune": "PUN",
   "Sangli": "SAN",
+  "Satara": "STR",
   // Add more locations as needed
 };

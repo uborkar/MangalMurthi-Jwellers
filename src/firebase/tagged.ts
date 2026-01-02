@@ -1,7 +1,15 @@
 // src/firebase/tagged.ts
 import { db } from "./config";
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where } from "firebase/firestore";
-import { getNextSerial } from "./serials";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+} from "firebase/firestore";
 
 export interface TaggedItem {
   id?: string;
@@ -34,13 +42,22 @@ export async function getTaggedItems(): Promise<TaggedItem[]> {
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as TaggedItem) }));
 }
 
-export async function addTaggedItem(item: Omit<TaggedItem, "id" | "createdAt">) {
-  const payload = { ...item, status: item.status || "pending", createdAt: new Date().toISOString() };
+export async function addTaggedItem(
+  item: Omit<TaggedItem, "id" | "createdAt">
+) {
+  const payload = {
+    ...item,
+    status: item.status || "pending",
+    createdAt: new Date().toISOString(),
+  };
   return await addDoc(taggedCollection, payload);
 }
 
 export async function updateTaggedItem(id: string, data: Partial<TaggedItem>) {
-  return await updateDoc(doc(db, "warehouse", "tagged_items", "items", id), data);
+  return await updateDoc(
+    doc(db, "warehouse", "tagged_items", "items", id),
+    data
+  );
 }
 
 export async function deleteTaggedItem(id: string) {
@@ -50,7 +67,9 @@ export async function deleteTaggedItem(id: string) {
 /**
  * Helper if you still want to compute a count (not required when using serials)
  */
-export async function getTaggedCountForCategory(category: string): Promise<number> {
+export async function getTaggedCountForCategory(
+  category: string
+): Promise<number> {
   // simple heuristic: count tagged items of that category
   const q = query(taggedCollection, where("category", "==", category));
   const snap = await getDocs(q);
@@ -63,4 +82,24 @@ export async function deleteAllTaggedItems(): Promise<number> {
   const deletePromises = snap.docs.map((d) => deleteDoc(d.ref));
   await Promise.all(deletePromises);
   return snap.docs.length; // Return count of deleted items
+}
+
+/**
+ * Batch add multiple tagged items at once
+ * Used by Tagging page for bulk operations
+ */
+export async function batchAddTaggedItems(
+  items: Omit<TaggedItem, "id" | "createdAt">[]
+): Promise<number> {
+  const promises = items.map((item) => {
+    const payload = {
+      ...item,
+      status: item.status || "pending",
+      createdAt: new Date().toISOString(),
+    };
+    return addDoc(taggedCollection, payload);
+  });
+
+  await Promise.all(promises);
+  return items.length;
 }

@@ -1,458 +1,682 @@
-import React, { useState, useEffect, useMemo } from "react";
+// src/pages/Shops/SalesReport.tsx - Professional Sales Analytics & Reports
+import { useEffect, useState, useMemo } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
-import { Download, Filter, RefreshCw } from "lucide-react";
-import Chart from "react-apexcharts";
-import { getFilteredInvoices, InvoiceWithId } from "../../firebase/invoices";
 import toast from "react-hot-toast";
+import {
+  TrendingUp,
+  DollarSign,
+  ShoppingBag,
+  Users,
+  Calendar,
+  Download,
+  Filter,
+  BarChart3,
+  PieChart,
+  FileSpreadsheet,
+} from "lucide-react";
+import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
+import { db } from "../../firebase/config";
 import * as XLSX from "xlsx";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import { getBranchLedger, getBranchLedgerSummary, flattenLedgerForExport, LedgerEntry } from "../../firebase/ledger";
 
-const inputClass =
-  "w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:border-primary focus:outline-none";
+type BranchName = "All" | "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
-const branches = ["Sangli", "Miraj", "Kolhapur"];
+interface Invoice {
+  invoiceId: string;
+  branch: string;
+  customerName: string;
+  customerPhone?: string;
+  salespersonName?: string;
+  items: InvoiceItem[];
+  totals: {
+    subtotal: number;
+    totalDiscount: number;
+    taxable: number;
+    gst: number;
+    cgst: number;
+    sgst: number;
+    grandTotal: number;
+  };
+  gstRate: number;
+  createdAt: string;
+}
+
+interface InvoiceItem {
+  barcode: string;
+  category: string;
+  subcategory?: string;
+  weight: string;
+  costPrice: number;
+  sellingPrice: number;
+  qty: number;
+  discount: number;
+  taxableAmount: number;
+}
+
+interface SalesStats {
+  totalSales: number;
+  totalRevenue: number;
+  totalItems: number;
+  totalCustomers: number;
+  avgOrderValue: number;
+  totalDiscount: number;
+  totalGST: number;
+  // Ledger stats
+  totalBookings?: number;
+  totalAdvances?: number;
+  totalPending?: number;
+  ledgerBalance?: number;
+}
+
+interface CategorySales {
+  category: string;
+  sales: number;
+  revenue: number;
+  items: number;
+  percentage: number;
+}
+
+interface SalespersonPerformance {
+  name: string;
+  sales: number;
+  revenue: number;
+  customers: number;
+  avgOrderValue: number;
+}
+
+const BRANCHES: BranchName[] = ["All", "Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
 export default function SalesReport() {
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [branch, setBranch] = useState("");
-  const [salesman, setSalesman] = useState("");
-  const [invoices, setInvoices] = useState<InvoiceWithId[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<BranchName>("All");
+  const [dateFrom, setDateFrom] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30); // Last 30 days
+    return date.toISOString().split("T")[0];
+  });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [showLedger, setShowLedger] = useState(false);
 
-  // Load invoices on mount
-  useEffect(() => {
-    loadInvoices();
-  }, []);
-
+  // Load invoices
   const loadInvoices = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const data = await getFilteredInvoices({});
-      setInvoices(data);
+      const allInvoices: Invoice[] = [];
+      const branches = selectedBranch === "All" 
+        ? ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"]
+        : [selectedBranch];
+
+      for (const branch of branches) {
+        const invoicesRef = collection(db, "shops", branch, "invoices");
+        const snapshot = await getDocs(invoicesRef);
+        
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data() as Invoice;
+          allInvoices.push(data);
+        });
+      }
+
+      // Filter by date range
+      const filtered = allInvoices.filter((inv) => {
+        const invDate = new Date(inv.createdAt).toISOString().split("T")[0];
+        return invDate >= dateFrom && invDate <= dateTo;
+      });
+
+      setInvoices(filtered);
+      toast.success(`Loaded ${filtered.length} invoices`);
+      
+      // Load ledger data
+      await loadLedgerData();
     } catch (error) {
       console.error("Error loading invoices:", error);
-      toast.error("Failed to load invoices");
+      toast.error("Failed to load sales data");
     } finally {
       setLoading(false);
     }
   };
 
-  const applyFilters = async () => {
+  // Load ledger data
+  const loadLedgerData = async () => {
     try {
-      setLoading(true);
-      const data = await getFilteredInvoices({
-        branch: branch || undefined,
-        salesman: salesman || undefined,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
-      });
-      setInvoices(data);
-      toast.success("Filters applied");
+      const branches = selectedBranch === "All" 
+        ? ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"]
+        : [selectedBranch];
+
+      const allLedgerEntries: LedgerEntry[] = [];
+
+      for (const branch of branches) {
+        try {
+          const entries = await getBranchLedger(branch, dateFrom, dateTo);
+          allLedgerEntries.push(...entries);
+        } catch (error) {
+          console.log(`No ledger data for ${branch}`);
+        }
+      }
+
+      setLedgerEntries(allLedgerEntries);
     } catch (error) {
-      console.error("Error applying filters:", error);
-      toast.error("Failed to apply filters");
-    } finally {
-      setLoading(false);
+      console.error("Error loading ledger:", error);
     }
   };
 
-  // Get unique salesmen from invoices
-  const salesmen = useMemo(() => {
-    const uniqueSalesmen = new Set<string>();
-    invoices.forEach((inv) => {
-      if (inv.salesman) uniqueSalesmen.add(inv.salesman);
-    });
-    return Array.from(uniqueSalesmen).sort();
-  }, [invoices]);
+  useEffect(() => {
+    loadInvoices();
+  }, [selectedBranch, dateFrom, dateTo]);
 
-  // Calculate KPIs
-  const kpis = useMemo(() => {
-    const totalSales = invoices.reduce((sum, inv) => sum + inv.totals.grandTotal, 0);
-    const totalGST = invoices.reduce((sum, inv) => sum + inv.totals.gstTotal, 0);
-    const totalInvoices = invoices.length;
-    const avgInvoice = totalInvoices > 0 ? totalSales / totalInvoices : 0;
+  // Calculate statistics
+  const stats: SalesStats = useMemo(() => {
+    const baseStats = {
+      totalSales: invoices.length,
+      totalRevenue: invoices.reduce((sum, inv) => sum + inv.totals.grandTotal, 0),
+      totalItems: invoices.reduce(
+        (sum, inv) => sum + inv.items.reduce((s, item) => s + item.qty, 0),
+        0
+      ),
+      totalCustomers: new Set(invoices.map((inv) => inv.customerPhone || inv.customerName))
+        .size,
+      avgOrderValue:
+        invoices.length > 0
+          ? invoices.reduce((sum, inv) => sum + inv.totals.grandTotal, 0) / invoices.length
+          : 0,
+      totalDiscount: invoices.reduce((sum, inv) => sum + inv.totals.totalDiscount, 0),
+      totalGST: invoices.reduce((sum, inv) => sum + inv.totals.gst, 0),
+    };
+
+    // Add ledger stats
+    const bookings = ledgerEntries.filter((e) => e.type === "booking");
+    const totalAdvances = bookings.reduce((sum, e) => sum + (e.advanceAmount || 0), 0);
+    const totalPending = ledgerEntries.reduce((sum, e) => sum + (e.pendingAmount || 0), 0);
+    const ledgerBalance = ledgerEntries.reduce((sum, e) => sum + e.debit - e.credit, 0);
 
     return {
-      totalSales,
-      totalGST,
-      totalInvoices,
-      avgInvoice,
+      ...baseStats,
+      totalBookings: bookings.length,
+      totalAdvances,
+      totalPending,
+      ledgerBalance,
     };
-  }, [invoices]);
+  }, [invoices, ledgerEntries]);
 
-  // Prepare chart data - Daily sales (last 7 days)
-  const dailyChartData = useMemo(() => {
-    const last7Days: string[] = [];
-    const salesByDay: number[] = [];
+  // Category-wise sales
+  const categorySales: CategorySales[] = useMemo(() => {
+    const categoryMap: Record<string, { sales: number; revenue: number; items: number }> = {};
 
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      last7Days.push(date.toLocaleDateString('en-US', { weekday: 'short' }));
-
-      const daySales = invoices
-        .filter(inv => inv.createdAt.startsWith(dateStr))
-        .reduce((sum, inv) => sum + inv.totals.grandTotal, 0);
-      
-      salesByDay.push(daySales);
-    }
-
-    return { categories: last7Days, data: salesByDay };
-  }, [invoices]);
-
-  // Category analysis
-  const categoryData = useMemo(() => {
-    const categories: Record<string, number> = {};
-
-    invoices.forEach((invoice) => {
-      invoice.rows.forEach((row) => {
-        const category = row.productName || "Others";
-        categories[category] = (categories[category] || 0) + row.taxableAmount;
+    invoices.forEach((inv) => {
+      inv.items.forEach((item) => {
+        if (!categoryMap[item.category]) {
+          categoryMap[item.category] = { sales: 0, revenue: 0, items: 0 };
+        }
+        categoryMap[item.category].sales += 1;
+        categoryMap[item.category].revenue += item.taxableAmount;
+        categoryMap[item.category].items += item.qty;
       });
     });
 
-    const labels = Object.keys(categories).slice(0, 5);
-    const series = Object.values(categories).slice(0, 5);
+    const totalRevenue = Object.values(categoryMap).reduce((sum, cat) => sum + cat.revenue, 0);
 
-    return { labels, series };
+    return Object.entries(categoryMap)
+      .map(([category, data]) => ({
+        category,
+        sales: data.sales,
+        revenue: data.revenue,
+        items: data.items,
+        percentage: totalRevenue > 0 ? (data.revenue / totalRevenue) * 100 : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
   }, [invoices]);
 
-  // -------------------- CHARTS ----------------------
+  // Salesperson performance
+  const salespersonPerformance: SalespersonPerformance[] = useMemo(() => {
+    const salesMap: Record<
+      string,
+      { sales: number; revenue: number; customers: Set<string> }
+    > = {};
 
-  const dailySalesOptions = {
-    chart: { type: "line", toolbar: { show: false }, fontFamily: "Outfit" },
-    stroke: { curve: "smooth", width: 3 },
-    colors: ["#465fff"],
-    xaxis: {
-      categories: dailyChartData.categories,
-      labels: { style: { colors: "#6b7280" } }
-    },
-    grid: { borderColor: "#e5e7eb30" }
-  };
-
-  const dailySalesSeries = [
-    { name: "Sales (₹)", data: dailyChartData.data },
-  ];
-
-  const categoryChart = {
-    chart: { type: "donut" },
-    labels: categoryData.labels.length > 0 ? categoryData.labels : ["No Data"],
-    colors: ["#6366f1", "#22c55e", "#f97316", "#ef4444", "#a855f7"],
-    legend: { position: "bottom" },
-    plotOptions: { pie: { donut: { size: "65%" } } }
-  };
-
-  const categorySeries = categoryData.series.length > 0 ? categoryData.series : [1];
-
-  // -------------------- EXPORT ACTIONS ----------------------
-
-  const exportExcel = () => {
-    if (invoices.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const excelData: any[] = invoices.map((inv, idx) => ({
-      "Sr No": idx + 1,
-      "Invoice ID": inv.id,
-      "Date": new Date(inv.createdAt).toLocaleDateString(),
-      "Branch": inv.branch,
-      "Customer": inv.customerName || "-",
-      "Salesman": inv.salesman || "-",
-      "Items": inv.rows.length,
-      "Subtotal": inv.totals.subtotal,
-      "Discount": inv.totals.totalDiscount,
-      "Taxable": inv.totals.taxable,
-      "GST": inv.totals.gstTotal,
-      "Grand Total": inv.totals.grandTotal,
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Report");
-
-    const fileName = `SalesReport_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(workbook, fileName);
-    toast.success("Excel downloaded");
-  };
-
-  const exportPDF = () => {
-    if (invoices.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
-
-    const doc = new jsPDF();
-
-    doc.setFontSize(18);
-    doc.text("SALES REPORT", 105, 15, { align: "center" });
-    
-    doc.setFontSize(11);
-    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 25);
-    doc.text(`Total Invoices: ${kpis.totalInvoices}`, 14, 32);
-    doc.text(`Total Sales: ₹${kpis.totalSales.toFixed(2)}`, 14, 39);
-
-    const tableData = invoices.map((inv, idx) => [
-      idx + 1,
-      inv.id.substring(0, 8),
-      new Date(inv.createdAt).toLocaleDateString(),
-      inv.branch,
-      inv.customerName || "-",
-      inv.salesman || "-",
-      `₹${inv.totals.grandTotal.toFixed(2)}`,
-    ]);
-
-    autoTable(doc, {
-      startY: 45,
-      head: [["#", "Invoice", "Date", "Branch", "Customer", "Salesman", "Total"]],
-      body: tableData,
-      theme: "grid",
-      headStyles: { fillColor: [41, 128, 185] },
-      styles: { fontSize: 8 },
+    invoices.forEach((inv) => {
+      const name = inv.salespersonName || "Unknown";
+      if (!salesMap[name]) {
+        salesMap[name] = { sales: 0, revenue: 0, customers: new Set() };
+      }
+      salesMap[name].sales += 1;
+      salesMap[name].revenue += inv.totals.grandTotal;
+      salesMap[name].customers.add(inv.customerPhone || inv.customerName);
     });
 
-    const fileName = `SalesReport_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
-    toast.success("PDF downloaded");
+    return Object.entries(salesMap)
+      .map(([name, data]) => ({
+        name,
+        sales: data.sales,
+        revenue: data.revenue,
+        customers: data.customers.size,
+        avgOrderValue: data.sales > 0 ? data.revenue / data.sales : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [invoices]);
+
+  // Export to Excel
+  const exportToExcel = () => {
+    if (invoices.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+
+    // Summary Sheet
+    const summaryData = [
+      { Metric: "Total Sales", Value: stats.totalSales },
+      { Metric: "Total Revenue", Value: `₹${stats.totalRevenue.toLocaleString()}` },
+      { Metric: "Total Items Sold", Value: stats.totalItems },
+      { Metric: "Total Customers", Value: stats.totalCustomers },
+      { Metric: "Average Order Value", Value: `₹${stats.avgOrderValue.toFixed(2)}` },
+      { Metric: "Total Discount", Value: `₹${stats.totalDiscount.toFixed(2)}` },
+      { Metric: "Total GST", Value: `₹${stats.totalGST.toFixed(2)}` },
+      {},
+      { Metric: "Branch", Value: selectedBranch },
+      { Metric: "Date From", Value: dateFrom },
+      { Metric: "Date To", Value: dateTo },
+      { Metric: "Generated On", Value: new Date().toLocaleString() },
+    ];
+    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+    // Category Sales Sheet
+    const categoryData = categorySales.map((cat) => ({
+      Category: cat.category,
+      Sales: cat.sales,
+      Revenue: cat.revenue,
+      Items: cat.items,
+      "Percentage (%)": cat.percentage.toFixed(2),
+    }));
+    const categorySheet = XLSX.utils.json_to_sheet(categoryData);
+    XLSX.utils.book_append_sheet(workbook, categorySheet, "Category Sales");
+
+    // Salesperson Performance Sheet
+    const salespersonData = salespersonPerformance.map((sp) => ({
+      Salesperson: sp.name,
+      Sales: sp.sales,
+      Revenue: sp.revenue,
+      Customers: sp.customers,
+      "Avg Order Value": sp.avgOrderValue.toFixed(2),
+    }));
+    const salespersonSheet = XLSX.utils.json_to_sheet(salespersonData);
+    XLSX.utils.book_append_sheet(workbook, salespersonSheet, "Salesperson Performance");
+
+    // Detailed Invoices Sheet
+    const invoiceData = invoices.map((inv) => ({
+      "Invoice ID": inv.invoiceId,
+      Branch: inv.branch,
+      Date: new Date(inv.createdAt).toLocaleString(),
+      Customer: inv.customerName,
+      Phone: inv.customerPhone || "-",
+      Salesperson: inv.salespersonName || "-",
+      Items: inv.items.length,
+      Subtotal: inv.totals.subtotal,
+      Discount: inv.totals.totalDiscount,
+      GST: inv.totals.gst,
+      "Grand Total": inv.totals.grandTotal,
+    }));
+    const invoiceSheet = XLSX.utils.json_to_sheet(invoiceData);
+    XLSX.utils.book_append_sheet(workbook, invoiceSheet, "Invoices");
+
+    // Ledger Sheet (if available)
+    if (ledgerEntries.length > 0) {
+      const ledgerData = flattenLedgerForExport(ledgerEntries);
+      const ledgerSheet = XLSX.utils.json_to_sheet(ledgerData);
+      XLSX.utils.book_append_sheet(workbook, ledgerSheet, "Ledger");
+
+      // Pending Amounts Sheet
+      const pendingData = ledgerEntries
+        .filter((e) => e.pendingAmount && e.pendingAmount > 0)
+        .map((e) => ({
+          "Entry No": e.entryNo,
+          Date: new Date(e.date).toLocaleDateString(),
+          Type: e.type,
+          "Party Name": e.partyName,
+          Phone: e.partyPhone || "-",
+          "Total Amount": e.totalAmount || 0,
+          "Advance Amount": e.advanceAmount || 0,
+          "Pending Amount": e.pendingAmount || 0,
+          Salesperson: e.salesperson || "-",
+        }));
+      
+      if (pendingData.length > 0) {
+        const pendingSheet = XLSX.utils.json_to_sheet(pendingData);
+        XLSX.utils.book_append_sheet(workbook, pendingSheet, "Pending Amounts");
+      }
+    }
+
+    // Download
+    XLSX.writeFile(
+      workbook,
+      `SalesReport_${selectedBranch}_${dateFrom}_to_${dateTo}.xlsx`
+    );
+    toast.success("Excel report downloaded!");
   };
 
   return (
     <>
       <PageMeta
-        title="Sales Report"
-        description="Daily, Monthly & Salesman Analysis with GST Summary"
+        title="Sales Report - Analytics"
+        description="Comprehensive sales analytics and reports"
       />
 
       <div className="grid grid-cols-12 gap-6">
         <div className="col-span-12">
           <TASection
-            title="📊 Sales Analytics Dashboard"
-            subtitle="Track branch sales, salesman performance & invoice analytics"
+            title="📊 Sales Report & Analytics"
+            subtitle="Comprehensive sales performance analysis"
           >
-            {/* ------------ KPI CARDS ------------ */}
-            <div className="grid grid-cols-12 gap-4 mb-6">
-              <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] md:p-6">
-                <div className="flex items-center justify-center w-12 h-12 bg-gray-100 rounded-xl dark:bg-gray-800">
-                  <span className="text-2xl">💰</span>
-                </div>
-                <div className="mt-5">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Total Sales</span>
-                  <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                    ₹{kpis.totalSales.toLocaleString()}
-                  </h4>
-                </div>
-              </div>
-
-              <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] md:p-6">
-                <div className="flex items-center justify-center w-12 h-12 bg-gray-100 rounded-xl dark:bg-gray-800">
-                  <span className="text-2xl">📄</span>
-                </div>
-                <div className="mt-5">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Total GST</span>
-                  <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                    ₹{kpis.totalGST.toLocaleString()}
-                  </h4>
-                </div>
-              </div>
-
-              <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] md:p-6">
-                <div className="flex items-center justify-center w-12 h-12 bg-gray-100 rounded-xl dark:bg-gray-800">
-                  <span className="text-2xl">📃</span>
-                </div>
-                <div className="mt-5">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Invoices</span>
-                  <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                    {kpis.totalInvoices}
-                  </h4>
-                </div>
-              </div>
-
-              <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] md:p-6">
-                <div className="flex items-center justify-center w-12 h-12 bg-gray-100 rounded-xl dark:bg-gray-800">
-                  <span className="text-2xl">📊</span>
-                </div>
-                <div className="mt-5">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Avg. Invoice</span>
-                  <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                    ₹{kpis.avgInvoice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </h4>
-                </div>
-              </div>
-            </div>
-
-            {/* ------------ FILTERS ------------ */}
-            <div className="p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] mb-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold flex items-center gap-2 text-gray-800 dark:text-white/90">
-                  <Filter size={20} /> Filters
-                </h2>
+            {/* Filters */}
+            <div className="mb-6 space-y-4">
+              <div className="flex items-center justify-between">
                 <button
-                  onClick={loadInvoices}
-                  disabled={loading}
-                  className="px-4 py-2.5 bg-gray-600 hover:bg-gray-700 text-white rounded-xl flex items-center gap-2 disabled:opacity-50 font-medium transition-colors dark:bg-gray-700 dark:hover:bg-gray-800"
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl transition-colors flex items-center gap-2"
                 >
-                  <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-                  Refresh
+                  <Filter size={18} />
+                  {showFilters ? "Hide Filters" : "Show Filters"}
+                </button>
+
+                <button
+                  onClick={exportToExcel}
+                  className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl transition-colors flex items-center gap-2"
+                >
+                  <Download size={18} />
+                  Export Excel
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <input 
-                  type="date" 
-                  className={inputClass} 
-                  value={startDate} 
-                  onChange={(e) => setStartDate(e.target.value)}
-                  placeholder="Start Date"
-                />
-                <input 
-                  type="date" 
-                  className={inputClass} 
-                  value={endDate} 
-                  onChange={(e) => setEndDate(e.target.value)}
-                  placeholder="End Date"
-                />
+              {showFilters && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-gray-800">
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                      Branch
+                    </label>
+                    <select
+                      value={selectedBranch}
+                      onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                    >
+                      {BRANCHES.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <select className={inputClass} value={branch} onChange={(e) => setBranch(e.target.value)}>
-                  <option value="">All Branches</option>
-                  {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                      <Calendar className="inline mr-1" size={14} />
+                      Date From
+                    </label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                    />
+                  </div>
 
-                <select className={inputClass} value={salesman} onChange={(e) => setSalesman(e.target.value)}>
-                  <option value="">All Salesmen</option>
-                  {salesmen.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-
-              <button 
-                onClick={applyFilters}
-                disabled={loading}
-                className="mt-4 px-5 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl disabled:opacity-50 font-medium transition-colors"
-              >
-                {loading ? "Loading..." : "Apply Filters"}
-              </button>
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                      <Calendar className="inline mr-1" size={14} />
+                      Date To
+                    </label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* ------------ CHARTS ------------ */}
-            <div className="grid grid-cols-12 gap-6">
-              {/* Daily Sales */}
-              <div className="col-span-12 xl:col-span-7 p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03]">
-                <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white/90">
-                  📈 Daily Sales Trend
-                </h3>
-                <Chart
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  options={dailySalesOptions as any}
-                  series={dailySalesSeries}
-                  type="line"
-                  height={260}
-                />
+            {/* Key Metrics Dashboard */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+                <div className="flex items-center justify-center w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl mb-3">
+                  <ShoppingBag className="text-blue-600 dark:text-blue-400" size={24} />
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">Total Sales</span>
+                <h4 className="mt-2 font-bold text-gray-800 text-2xl dark:text-white/90">
+                  {stats.totalSales}
+                </h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Invoices</p>
               </div>
 
-              {/* Category Strength */}
-              <div className="col-span-12 xl:col-span-5 p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03]">
-                <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white/90">
-                  💍 Category Contribution
-                </h3>
-                <Chart
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  options={categoryChart as any}
-                  series={categorySeries}
-                  type="donut"
-                  height={260}
-                />
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+                <div className="flex items-center justify-center w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl mb-3">
+                  <DollarSign className="text-green-600 dark:text-green-400" size={24} />
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">Total Revenue</span>
+                <h4 className="mt-2 font-bold text-green-600 text-2xl dark:text-green-400">
+                  ₹{stats.totalRevenue.toLocaleString()}
+                </h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Avg: ₹{stats.avgOrderValue.toFixed(0)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+                <div className="flex items-center justify-center w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-xl mb-3">
+                  <TrendingUp className="text-purple-600 dark:text-purple-400" size={24} />
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">Items Sold</span>
+                <h4 className="mt-2 font-bold text-gray-800 text-2xl dark:text-white/90">
+                  {stats.totalItems}
+                </h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Units</p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+                <div className="flex items-center justify-center w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-xl mb-3">
+                  <Users className="text-orange-600 dark:text-orange-400" size={24} />
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">Customers</span>
+                <h4 className="mt-2 font-bold text-gray-800 text-2xl dark:text-white/90">
+                  {stats.totalCustomers}
+                </h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Unique</p>
               </div>
             </div>
 
-            {/* ------------ TABLE  ------------ */}
-            <div className="mt-8 p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03]">
-              <div className="flex justify-between mb-4">
-                <h2 className="text-xl font-semibold text-gray-800 dark:text-white/90">
-                  Invoice List ({invoices.length})
-                </h2>
+            {/* Ledger Summary Cards */}
+            {ledgerEntries.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="rounded-2xl border border-purple-200 bg-purple-50 p-5 dark:border-purple-800 dark:bg-purple-900/20">
+                  <div className="flex items-center justify-center w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-xl mb-3">
+                    <FileSpreadsheet className="text-purple-600 dark:text-purple-400" size={24} />
+                  </div>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Total Bookings</span>
+                  <h4 className="mt-2 font-bold text-gray-800 text-2xl dark:text-white/90">
+                    {stats.totalBookings || 0}
+                  </h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Advance orders</p>
+                </div>
 
-                <div className="flex gap-3">
-                  <button 
-                    onClick={exportExcel} 
-                    disabled={invoices.length === 0}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <Download size={16} /> Excel
-                  </button>
-                  <button 
-                    onClick={exportPDF} 
-                    disabled={invoices.length === 0}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <Download size={16} /> PDF
-                  </button>
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-800 dark:bg-blue-900/20">
+                  <div className="flex items-center justify-center w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl mb-3">
+                    <DollarSign className="text-blue-600 dark:text-blue-400" size={24} />
+                  </div>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Total Advances</span>
+                  <h4 className="mt-2 font-bold text-blue-600 text-2xl dark:text-blue-400">
+                    ₹{(stats.totalAdvances || 0).toLocaleString()}
+                  </h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Received</p>
+                </div>
+
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-5 dark:border-red-800 dark:bg-red-900/20">
+                  <div className="flex items-center justify-center w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-xl mb-3">
+                    <TrendingUp className="text-red-600 dark:text-red-400" size={24} />
+                  </div>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Pending Amount</span>
+                  <h4 className="mt-2 font-bold text-red-600 text-2xl dark:text-red-400">
+                    ₹{(stats.totalPending || 0).toLocaleString()}
+                  </h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">To be collected</p>
+                </div>
+
+                <div className="rounded-2xl border border-green-200 bg-green-50 p-5 dark:border-green-800 dark:bg-green-900/20">
+                  <div className="flex items-center justify-center w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl mb-3">
+                    <BarChart3 className="text-green-600 dark:text-green-400" size={24} />
+                  </div>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Ledger Balance</span>
+                  <h4 className="mt-2 font-bold text-green-600 text-2xl dark:text-green-400">
+                    ₹{(stats.ledgerBalance || 0).toLocaleString()}
+                  </h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Net position</p>
+                </div>
+              </div>
+            )}
+
+            {/* Category Sales */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] p-6">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                  <PieChart size={20} className="text-blue-600 dark:text-blue-400" />
+                  Category-wise Sales
+                </h3>
+                <div className="space-y-3">
+                  {categorySales.slice(0, 5).map((cat) => (
+                    <div key={cat.category}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          {cat.category}
+                        </span>
+                        <span className="text-sm font-bold text-gray-900 dark:text-white">
+                          ₹{cat.revenue.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full transition-all"
+                          style={{ width: `${cat.percentage}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {cat.items} items
+                        </span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {cat.percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
+              {/* Salesperson Performance */}
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] p-6">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                  <BarChart3 size={20} className="text-green-600 dark:text-green-400" />
+                  Top Salespersons
+                </h3>
+                <div className="space-y-4">
+                  {salespersonPerformance.slice(0, 5).map((sp, index) => (
+                    <div
+                      key={sp.name}
+                      className="flex items-center justify-between p-3 bg-gray-50 dark:bg-white/5 rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-center w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-full text-green-600 dark:text-green-400 font-bold text-sm">
+                          {index + 1}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-900 dark:text-white">
+                            {sp.name}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {sp.sales} sales • {sp.customers} customers
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-green-600 dark:text-green-400">
+                          ₹{sp.revenue.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Avg: ₹{sp.avgOrderValue.toFixed(0)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Invoices */}
+            <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] overflow-hidden">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <FileSpreadsheet size={20} className="text-purple-600 dark:text-purple-400" />
+                  Recent Invoices
+                </h3>
+              </div>
               <div className="overflow-x-auto">
-                <table className="w-full border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden text-sm">
-                  <thead className="bg-gray-100 dark:bg-white/[0.08]">
-                    <tr>
-                      {["#", "Invoice ID", "Date", "Branch", "Customer", "Salesman", "Items", "Total", "GST"].map((h) => (
-                        <th key={h} className="border p-2 text-left text-gray-700 dark:text-gray-300">{h}</th>
-                      ))}
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-white/5">
+                    <tr className="text-left font-semibold text-gray-700 dark:text-gray-300">
+                      <th className="p-3 text-xs">Invoice ID</th>
+                      <th className="p-3 text-xs">Date</th>
+                      <th className="p-3 text-xs">Branch</th>
+                      <th className="p-3 text-xs">Customer</th>
+                      <th className="p-3 text-xs">Salesperson</th>
+                      <th className="p-3 text-xs">Items</th>
+                      <th className="p-3 text-xs">Amount</th>
                     </tr>
                   </thead>
-
                   <tbody>
-                    {loading ? (
-                      <tr>
-                        <td colSpan={9} className="p-4 text-center text-gray-600 dark:text-gray-300">
-                          Loading invoices...
+                    {invoices.slice(0, 10).map((inv) => (
+                      <tr
+                        key={inv.invoiceId}
+                        className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
+                      >
+                        <td className="p-3 font-mono text-xs text-blue-600 dark:text-blue-400">
+                          {inv.invoiceId.split("-").pop()}
+                        </td>
+                        <td className="p-3 text-xs text-gray-600 dark:text-gray-400">
+                          {new Date(inv.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="p-3 text-xs">{inv.branch}</td>
+                        <td className="p-3 text-xs">{inv.customerName}</td>
+                        <td className="p-3 text-xs">{inv.salespersonName || "-"}</td>
+                        <td className="p-3 text-xs">{inv.items.length}</td>
+                        <td className="p-3 text-xs font-semibold text-green-600 dark:text-green-400">
+                          ₹{inv.totals.grandTotal.toLocaleString()}
                         </td>
                       </tr>
-                    ) : invoices.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="p-4 text-center text-gray-600 dark:text-gray-300">
-                          No invoices found. Try adjusting filters or create new invoices.
-                        </td>
-                      </tr>
-                    ) : (
-                      invoices.map((invoice, idx) => (
-                        <tr key={invoice.id} className="border-t dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5">
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300">{idx + 1}</td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300 font-mono text-xs">
-                            {invoice.id.substring(0, 12)}...
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300">
-                            {new Date(invoice.createdAt).toLocaleDateString()}
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300">
-                            <span className="px-2 py-1 bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded text-xs">
-                              {invoice.branch}
-                            </span>
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300">
-                            {invoice.customerName || "-"}
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300">
-                            {invoice.salesman || "-"}
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-center text-gray-700 dark:text-gray-300">
-                            {invoice.rows.length}
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300 font-semibold">
-                            ₹{invoice.totals.grandTotal.toLocaleString()}
-                          </td>
-                          <td className="border p-2 dark:border-gray-800 text-gray-700 dark:text-gray-300">
-                            ₹{invoice.totals.gstTotal.toLocaleString()}
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            {/* Loading State */}
+            {loading && (
+              <div className="p-8 text-center">
+                <div className="text-4xl mb-2">⏳</div>
+                <p className="text-gray-500 dark:text-gray-400">Loading sales data...</p>
+              </div>
+            )}
+
+            {/* Empty State */}
+            {!loading && invoices.length === 0 && (
+              <div className="p-8 text-center">
+                <div className="text-4xl mb-2">📊</div>
+                <p className="text-gray-500 dark:text-gray-400">
+                  No sales data found for the selected period
+                </p>
+              </div>
+            )}
           </TASection>
         </div>
       </div>

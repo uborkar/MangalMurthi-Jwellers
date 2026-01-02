@@ -1,41 +1,47 @@
-import EcommerceMetrics from "../../components/ecommerce/EcommerceMetrics";
-import MonthlySalesChart from "../../components/ecommerce/MonthlySalesChart";
-import StatisticsChart from "../../components/ecommerce/StatisticsChart";
-import MonthlyTarget from "../../components/ecommerce/MonthlyTarget";
-import RecentOrders from "../../components/ecommerce/RecentOrders";
-import DemographicCard from "../../components/ecommerce/DemographicCard";
 import PageMeta from "../../components/common/PageMeta";
+import { useAuth } from "../../context/AuthContext";
+import AdminDashboard from "./AdminDashboard";
+import ManagerDashboard from "./ManagerDashboard";
+import WarehouseDashboard from "./WarehouseDashboard";
+import ShopDashboard from "./ShopDashboard";
 
 export default function Home() {
+  const { userRole, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="inline-block w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <PageMeta
-        title="MangalMurti Distrubutors"
-        description="This is the dashboard home page of MangalMurti Distrubutors admin panel."
+        title="Dashboard - Suwarnasparsh Jewellers"
+        description="Your personalized dashboard"
       />
-      <div className="grid grid-cols-12 gap-4 md:gap-6">
-        <div className="col-span-12 space-y-6 xl:col-span-7">
-          <EcommerceMetrics />
-
-          <MonthlySalesChart />
+      
+      {userRole === "admin" && <AdminDashboard />}
+      {userRole === "manager" && <ManagerDashboard />}
+      {userRole === "warehouse" && <WarehouseDashboard />}
+      {userRole === "shop" && <ShopDashboard />}
+      
+      {!userRole && (
+        <div className="p-8 text-center">
+          <div className="text-4xl mb-4">⚠️</div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+            No Role Assigned
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400">
+            Please contact administrator to assign your role.
+          </p>
         </div>
-
-        <div className="col-span-12 xl:col-span-5">
-          <MonthlyTarget />
-        </div>
-
-        <div className="col-span-12">
-          <StatisticsChart />
-        </div>
-
-        <div className="col-span-12 xl:col-span-5">
-          <DemographicCard />
-        </div>
-
-        <div className="col-span-12 xl:col-span-7">
-          <RecentOrders />
-        </div>
-      </div>
+      )}
     </>
   );
 }

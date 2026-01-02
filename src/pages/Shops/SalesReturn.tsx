@@ -1,627 +1,640 @@
-import { useState, useEffect } from "react";
+// src/pages/Shops/SalesReturn.tsx - FIXED Sales Return Management
+import { useState } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
-import { RotateCcw, Trash2, PackageX, Send } from "lucide-react";
 import toast from "react-hot-toast";
 import {
-  addSalesReturn,
+  Search,
+  RotateCcw,
+  AlertCircle,
+  ArrowLeft,
+  Save,
+  Truck,
+  Scan,
+} from "lucide-react";
+import {
+  getInvoiceById,
+  addCustomerReturn,
   addWarehouseReturn,
+  updateBranchStockStatus,
+  getStockItemByBarcode,
+  InvoiceData,
+  CustomerReturnItem,
+  WarehouseReturnItem,
 } from "../../firebase/salesReturns";
-import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
-import { deleteDoc, doc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
+import BarcodeScanner from "../../components/common/BarcodeScanner";
 
-interface ReturnItem {
-  stockItemId: string;
-  label: string;
-  productName?: string;
-  category?: string;
-  weight?: string | number;
-  purity?: string;
-  price: number;
-  qty: number;
-  returnReason: string;
-}
+type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
+type ReturnType = "customer-to-shop" | "shop-to-warehouse";
 
-type BranchName = "Sangli" | "Miraj" | "Kolhapur";
+const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
-const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur"];
-
-const RETURN_REASONS = [
+const CUSTOMER_RETURN_REASONS = [
   "Defective",
+  "Wrong Item",
   "Customer Changed Mind",
-  "Wrong Item Sent",
+  "Size Issue",
   "Quality Issue",
-  "Damaged in Transit",
-  "Other"
+  "Other",
 ];
 
-// Modern Toast Notifications
-const showSuccessToast = (message: string) => {
-  toast.success(message, {
-    duration: 4000,
-    position: 'top-right',
-    style: {
-      background: '#10B981',
-      color: '#fff',
-      padding: '16px',
-      borderRadius: '12px',
-      fontSize: '14px',
-      fontWeight: '500',
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    },
-    icon: '✅',
-  });
-};
-
-const showErrorToast = (message: string) => {
-  toast.error(message, {
-    duration: 5000,
-    position: 'top-right',
-    style: {
-      background: '#EF4444',
-      color: '#fff',
-      padding: '16px',
-      borderRadius: '12px',
-      fontSize: '14px',
-      fontWeight: '500',
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    },
-    icon: '❌',
-  });
-};
-
-const showWarningToast = (message: string) => {
-  toast.error(message, {
-    duration: 4500,
-    position: 'top-right',
-    style: {
-      background: '#F59E0B',
-      color: '#fff',
-      padding: '16px',
-      borderRadius: '12px',
-      fontSize: '14px',
-      fontWeight: '500',
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    },
-    icon: '⚠️',
-  });
-};
-
-const showInfoToast = (message: string) => {
-  toast(message, {
-    duration: 3500,
-    position: 'top-right',
-    style: {
-      background: '#3B82F6',
-      color: '#fff',
-      padding: '16px',
-      borderRadius: '12px',
-      fontSize: '14px',
-      fontWeight: '500',
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    },
-    icon: 'ℹ️',
-  });
-};
-
-const showLoadingToast = (message: string) => {
-  return toast.loading(message, {
-    position: 'top-right',
-    style: {
-      background: '#6366F1',
-      color: '#fff',
-      padding: '16px',
-      borderRadius: '12px',
-      fontSize: '14px',
-      fontWeight: '500',
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-    },
-  });
-};
+const WAREHOUSE_RETURN_REASONS = [
+  "Unsold Stock",
+  "Damaged",
+  "Quality Issue",
+  "Wrong Item",
+  "Other",
+];
 
 export default function SalesReturn() {
-  const inputClass =
-    "w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:border-primary focus:outline-none";
-
+  const [returnType, setReturnType] = useState<ReturnType>("customer-to-shop");
   const [selectedBranch, setSelectedBranch] = useState<BranchName>("Sangli");
-  const [branchStock, setBranchStock] = useState<BranchStockItem[]>([]);
-  const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState("");
-  const [stockFilter, setStockFilter] = useState<"all" | "in-branch" | "sold">("all");
+  
+  // Customer Return States
+  const [invoiceId, setInvoiceId] = useState("");
+  const [invoice, setInvoice] = useState<(InvoiceData & { id: string}) | null>(null);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
+  const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
+  
+  // Warehouse Return States
+  const [scannedItems, setScannedItems] = useState<any[]>([]);
+  const [warehouseReasons, setWarehouseReasons] = useState<Record<string, string>>({});
+  const [warehouseRemarks, setWarehouseRemarks] = useState<Record<string, string>>({});
+  
+  const [searching, setSearching] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [scannerDisabled, setScannerDisabled] = useState(false); // Disable scanner when typing
 
-  // ---------------------- LOAD BRANCH STOCK ----------------------
-  const loadBranchStock = async () => {
-    const loadingToastId = showLoadingToast(`Loading ${selectedBranch} stock...`);
-    
+  // Search Invoice (Customer Return)
+  const handleSearchInvoice = async () => {
+    if (!invoiceId.trim()) {
+      toast.error("Enter invoice ID");
+      return;
+    }
+
+    setSearching(true);
     try {
-      setLoading(true);
-      console.log(`🔄 Loading stock for branch: ${selectedBranch}`);
-      console.log(`📍 Path: shops/${selectedBranch}/stockItems`);
+      const foundInvoice = await getInvoiceById(selectedBranch, invoiceId.trim());
       
-      const stock = await getShopStock(selectedBranch);
-      console.log(`✅ Loaded ${stock.length} items from ${selectedBranch}`);
-      
-      // Log first few items to verify data
-      if (stock.length > 0) {
-        console.log("Sample items:", stock.slice(0, 3));
+      if (!foundInvoice) {
+        toast.error(`Invoice ${invoiceId} not found in ${selectedBranch}`);
+        setInvoice(null);
+        return;
       }
-      
-      setBranchStock(stock);
-      toast.dismiss(loadingToastId);
-      
-      if (stock.length === 0) {
-        showWarningToast(`No stock items found in ${selectedBranch} branch`);
-      } else {
-        showSuccessToast(`✨ Loaded ${stock.length} items from ${selectedBranch}`);
-      }
+
+      setInvoice(foundInvoice);
+      setSelectedItems(new Set());
+      setReturnReasons({});
+      setReturnRemarks({});
+      toast.success(`Found invoice with ${foundInvoice.items.length} items`);
     } catch (error) {
-      console.error("Error loading branch stock:", error);
-      toast.dismiss(loadingToastId);
-      showErrorToast("Failed to load branch stock. Please try again.");
-      setBranchStock([]);
+      console.error("Error searching invoice:", error);
+      toast.error("Failed to search invoice");
     } finally {
-      setLoading(false);
+      setSearching(false);
     }
   };
 
-  useEffect(() => {
-    loadBranchStock();
-    // Reset return items when branch changes
-    setReturnItems([]);
-    setSearchText("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranch]);
-
-  // Filter stock items by search text and status filter
-  const filteredStockItems = branchStock.filter(item => {
-    const search = searchText.toLowerCase();
-    const matchesSearch = 
-      item.label.toLowerCase().includes(search) ||
-      (item.productName || "").toLowerCase().includes(search) ||
-      (item.category || "").toLowerCase().includes(search);
-    
-    const matchesFilter = 
-      stockFilter === "all" || 
-      item.status === stockFilter;
-    
-    return matchesSearch && matchesFilter;
-  });
-
-  // Get count by status
-  const statusCounts = {
-    all: branchStock.length,
-    "in-branch": branchStock.filter(i => i.status === "in-branch").length,
-    sold: branchStock.filter(i => i.status === "sold").length,
-  };
-
-  // ---------------------- ADD ITEM TO RETURN LIST ----------------------
-  const addToReturnList = (item: BranchStockItem) => {
-    if (!item.id) {
-      showErrorToast("Invalid item: Missing ID");
-      return;
-    }
-
-    // Check if item already in return list
-    if (returnItems.some(ri => ri.stockItemId === item.id)) {
-      showWarningToast(`${item.label} is already in the return list`);
-      return;
-    }
-    
-    const returnItem: ReturnItem = {
-      stockItemId: item.id,
-      label: item.label,
-      productName: item.productName || "Unknown Product",
-      category: item.category || "Uncategorized",
-      weight: item.weight || item.weightG || 0,
-      purity: item.purity || "-",
-      price: item.basePrice || item.costPrice || 0,
-      qty: 1,
-      returnReason: "Customer Changed Mind", // Default reason
-    };
-    
-    setReturnItems((prev) => [...prev, returnItem]);
-    showSuccessToast(`✓ ${item.label} added to return list`);
-  };
-
-  // ---------------------- UPDATE RETURN ITEM ----------------------
-  const updateReturnItem = <K extends keyof ReturnItem>(stockItemId: string, field: K, value: ReturnItem[K]) => {
-    setReturnItems((prev) =>
-      prev.map((item) =>
-        item.stockItemId === stockItemId ? { ...item, [field]: value } : item
-      )
-    );
-  };
-
-  // ---------------------- REMOVE FROM RETURN LIST ----------------------
-  const removeFromReturn = (stockItemId: string) => {
-    setReturnItems((prev) => prev.filter((i) => i.stockItemId !== stockItemId));
-    showInfoToast("Item removed from return list");
-  };
-
-  // ---------------------- SUBMIT RETURN ----------------------
-  const submitReturn = async () => {
-    if (returnItems.length === 0) {
-      showWarningToast("No items selected for return");
-      return;
-    }
-
-    // Validate all items have reasons
-    const itemsWithoutReason = returnItems.filter(item => !item.returnReason);
-    if (itemsWithoutReason.length > 0) {
-      showWarningToast("Please select return reason for all items");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Are you sure you want to return ${returnItems.length} item(s) from ${selectedBranch} to Warehouse?\n\nNote: Items will be removed from ${selectedBranch} branch stock.`
-    );
-
-    if (!confirmed) return;
-
-    const loadingToastId = showLoadingToast(`Processing ${returnItems.length} return(s)...`);
+  // Handle Barcode Scan (Warehouse Return)
+  const handleBarcodeScan = async (barcode: string) => {
+    if (!barcode.trim()) return;
 
     try {
-      setLoading(true);
-      console.log(`📦 Processing return of ${returnItems.length} items from ${selectedBranch}`);
+      // Check if already scanned
+      if (scannedItems.find(item => item.barcode === barcode)) {
+        toast("Item already scanned", { icon: "ℹ️" });
+        return;
+      }
 
-      let successCount = 0;
-      const failedItems: string[] = [];
+      // Get stock item from branch
+      const stockItem = await getStockItemByBarcode(selectedBranch, barcode);
+      
+      if (!stockItem) {
+        toast.error(`Item ${barcode} not found in ${selectedBranch} stock`);
+        return;
+      }
 
-      // Process each return item
-      for (const item of returnItems) {
+      if (stockItem.status !== "in-branch") {
+        toast.error(`Item ${barcode} is not available (status: ${stockItem.status})`);
+        return;
+      }
+
+      // Add to scanned items
+      setScannedItems(prev => [...prev, {
+        ...stockItem,
+        barcode: stockItem.barcode || stockItem.label,
+      }]);
+      
+      toast.success(`✅ Added: ${barcode}`);
+    } catch (error) {
+      console.error("Error scanning barcode:", error);
+      toast.error("Failed to process barcode");
+    }
+  };
+
+  // Process Customer Return
+  const handleProcessCustomerReturn = async () => {
+    if (selectedItems.size === 0) {
+      toast.error("Select at least one item to return");
+      return;
+    }
+
+    // Validate reasons
+    for (const barcode of selectedItems) {
+      if (!returnReasons[barcode]) {
+        toast.error("Select return reason for all items");
+        return;
+      }
+    }
+
+    setProcessing(true);
+    const loadingToast = toast.loading(`Processing ${selectedItems.size} return(s)...`);
+
+    try {
+      const returnId = `CR-${selectedBranch}-${Date.now()}`;
+
+      for (const barcode of selectedItems) {
+        const item = invoice!.items.find(i => i.barcode === barcode);
+        if (!item) continue;
+
+        // Add customer return record
+        await addCustomerReturn(selectedBranch, {
+          returnId,
+          invoiceId: invoice!.id,
+          branch: selectedBranch,
+          barcode: item.barcode,
+          category: item.category,
+          subcategory: item.subcategory,
+          location: item.location,
+          type: item.type,
+          weight: item.weight,
+          sellingPrice: item.sellingPrice,
+          discount: item.discount || 0,
+          taxableAmount: item.taxableAmount,
+          returnReason: returnReasons[barcode],
+          remarks: returnRemarks[barcode] || "",
+          returnedBy: "current-user", // TODO: Get from auth
+          returnDate: new Date().toISOString(),
+          status: "returned-to-shop",
+        });
+
+        // Update stock status back to "in-branch"
+        await updateBranchStockStatus(selectedBranch, barcode, "in-branch");
+      }
+
+      toast.dismiss(loadingToast);
+      toast.success(`✅ ${selectedItems.size} item(s) returned to shop inventory`);
+      
+      // Reset
+      setInvoice(null);
+      setInvoiceId("");
+      setSelectedItems(new Set());
+      setReturnReasons({});
+      setReturnRemarks({});
+    } catch (error) {
+      console.error("Error processing customer return:", error);
+      toast.dismiss(loadingToast);
+      toast.error("Failed to process return");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Process Warehouse Return
+  const handleProcessWarehouseReturn = async () => {
+    if (scannedItems.length === 0) {
+      toast.error("Scan at least one item to return");
+      return;
+    }
+
+    // Validate reasons
+    for (const item of scannedItems) {
+      if (!warehouseReasons[item.barcode]) {
+        toast.error("Select return reason for all items");
+        return;
+      }
+    }
+
+    setProcessing(true);
+    const loadingToast = toast.loading(`Processing ${scannedItems.length} return(s)...`);
+
+    try {
+      const returnId = `WR-${selectedBranch}-${Date.now()}`;
+
+      for (const item of scannedItems) {
+        // Add warehouse return record
+        await addWarehouseReturn({
+          returnId,
+          branch: selectedBranch,
+          barcode: item.barcode,
+          category: item.category,
+          subcategory: item.subcategory || "",
+          location: item.location || "",
+          type: item.costPriceType || item.type || "",
+          weight: String(item.weight || ""),
+          costPrice: item.costPrice || 0, // Default to 0 if undefined
+          returnReason: warehouseReasons[item.barcode],
+          remarks: warehouseRemarks[item.barcode] || "",
+          returnedBy: "current-user",
+          returnDate: new Date().toISOString(),
+          status: "pending-warehouse",
+        });
+
+        // Update stock status to "returned"
+        await updateBranchStockStatus(selectedBranch, item.barcode, "returned");
+        
+        // Update warehouse item status
         try {
-          console.log(`Processing return for: ${item.label}`);
-
-          // 1. Add to sales return collection (shop record)
-          await addSalesReturn(selectedBranch, {
-            invoiceId: "DIRECT-RETURN",
-            branch: selectedBranch,
-            stockItemId: item.stockItemId,
-            label: item.label,
-            productName: item.productName || item.label,
-            type: item.category || "Unknown",
-            location: selectedBranch,
-            qty: item.qty,
-            price: item.price,
-            discount: 0,
-            gst: 0,
-            net: item.price * item.qty,
-            returnDate: new Date().toISOString(),
-            status: "pending",
-            remarks: item.returnReason,
-          });
-
-          // 2. Add to warehouse returns (warehouse record)
-          await addWarehouseReturn({
-            productName: item.productName || item.label,
-            category: item.category || "Unknown",
-            label: item.label,
-            quantity: item.qty,
-            weight: item.weight?.toString() || "0",
-            condition: "To Be Inspected",
-            remarks: `${item.returnReason} | From ${selectedBranch}`,
+          const warehouseItemRef = doc(db, "warehouseItems", item.warehouseItemId || item.barcode);
+          await updateDoc(warehouseItemRef, {
+            status: "returned",
+            returnedAt: new Date().toISOString(),
             returnedFrom: selectedBranch,
-            returnDate: new Date().toISOString(),
-            status: "pending",
           });
-
-          // 3. Delete item from branch stock (like ShopTransfer does)
-          // This removes the item completely from the branch's inventory
-          await deleteDoc(doc(db, "shops", selectedBranch, "stockItems", item.stockItemId));
-          console.log(`🗑️ Deleted ${item.label} from ${selectedBranch} branch stock`);
-
-          successCount++;
-          console.log(`✅ Successfully processed: ${item.label}`);
-        } catch (itemError) {
-          console.error(`❌ Failed to process ${item.label}:`, itemError);
-          failedItems.push(item.label);
+        } catch (err) {
+          console.log("Warehouse item update skipped:", err);
         }
       }
 
-      toast.dismiss(loadingToastId);
-
-      // Show results
-      if (successCount === returnItems.length) {
-        showSuccessToast(`🎉 Successfully returned ${successCount} item(s) to warehouse!`);
-      } else if (successCount > 0) {
-        showWarningToast(`Returned ${successCount} items. Failed: ${failedItems.join(", ")}`);
-      } else {
-        showErrorToast("Failed to process returns");
-      }
+      toast.dismiss(loadingToast);
+      toast.success(`✅ ${scannedItems.length} item(s) returned to warehouse`);
       
-      // Reset and reload
-      setReturnItems([]);
-      setSearchText("");
-      await loadBranchStock();
+      // Reset
+      setScannedItems([]);
+      setWarehouseReasons({});
+      setWarehouseRemarks({});
     } catch (error) {
-      console.error("Error processing return:", error);
-      toast.dismiss(loadingToastId);
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      showErrorToast(`Failed to process return: ${errorMessage}`);
+      console.error("Error processing warehouse return:", error);
+      toast.dismiss(loadingToast);
+      toast.error("Failed to process return");
     } finally {
-      setLoading(false);
+      setProcessing(false);
     }
   };
 
+  const inputStyle =
+    "w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-sm text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:border-primary focus:outline-none";
+
   return (
     <>
-      <PageMeta
-        title="Sales Return"
-        description="Return sold items back to warehouse"
-      />
+      <PageMeta title="Sales Return Management" description="Handle customer returns and shop-to-warehouse returns" />
 
       <div className="grid grid-cols-12 gap-6">
         <div className="col-span-12">
           <TASection
-            title="↩️ Sales Return"
-            subtitle="Return sold items back into warehouse stock"
+            title="🔄 Sales Return Management"
+            subtitle="Process customer returns and shop-to-warehouse returns"
           >
-            {/* ---------------------- BRANCH & SEARCH ---------------------- */}
-            <div className="p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] mb-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-semibold text-gray-800 dark:text-white/90">
-                  {selectedBranch} Branch Stock
-                </h3>
-                <button
-                  onClick={loadBranchStock}
-                  disabled={loading}
-                  className="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl flex items-center gap-2 disabled:opacity-50 font-medium transition-colors"
-                >
-                  <RotateCcw size={16} className={loading ? "animate-spin" : ""} />
-                  Refresh
-                </button>
-              </div>
+            {/* Return Type Selection */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <button
+                onClick={() => {
+                  setReturnType("customer-to-shop");
+                  setInvoice(null);
+                  setScannedItems([]);
+                }}
+                className={`p-6 rounded-xl border-2 transition-all ${
+                  returnType === "customer-to-shop"
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                    : "border-gray-200 dark:border-gray-800 hover:border-gray-300"
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <ArrowLeft
+                    className={returnType === "customer-to-shop" ? "text-blue-600 dark:text-blue-400" : "text-gray-400"}
+                    size={24}
+                  />
+                  <h3 className={`font-bold text-lg ${returnType === "customer-to-shop" ? "text-blue-900 dark:text-blue-300" : "text-gray-700 dark:text-gray-300"}`}>
+                    Customer Return
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Customer returns sold items. Items go back to shop inventory.
+                </p>
+              </button>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <select
-                  className={inputClass}
-                  value={selectedBranch}
-                  onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
-                  disabled={loading}
-                >
-                  {BRANCHES.map((branch) => (
-                    <option key={branch} value={branch}>
-                      {branch}
-                    </option>
-                  ))}
-                </select>
+              <button
+                onClick={() => {
+                  setReturnType("shop-to-warehouse");
+                  setInvoice(null);
+                  setScannedItems([]);
+                }}
+                className={`p-6 rounded-xl border-2 transition-all ${
+                  returnType === "shop-to-warehouse"
+                    ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
+                    : "border-gray-200 dark:border-gray-800 hover:border-gray-300"
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <Truck
+                    className={returnType === "shop-to-warehouse" ? "text-purple-600 dark:text-purple-400" : "text-gray-400"}
+                    size={24}
+                  />
+                  <h3 className={`font-bold text-lg ${returnType === "shop-to-warehouse" ? "text-purple-900 dark:text-purple-300" : "text-gray-700 dark:text-gray-300"}`}>
+                    Shop to Warehouse
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Shop returns unsold/damaged items to warehouse.
+                </p>
+              </button>
+            </div>
 
-                <input
-                  type="text"
-                  placeholder="Search by label, product name, category..."
-                  className={inputClass}
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                />
-              </div>
-
-              {/* Status Filter Buttons */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setStockFilter("all")}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    stockFilter === "all"
-                      ? "bg-primary text-white"
-                      : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  All ({statusCounts.all})
-                </button>
-                <button
-                  onClick={() => setStockFilter("in-branch")}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    stockFilter === "in-branch"
-                      ? "bg-green-500 text-white dark:bg-green-600"
-                      : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  In-Branch ({statusCounts["in-branch"]})
-                </button>
-                <button
-                  onClick={() => setStockFilter("sold")}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    stockFilter === "sold"
-                      ? "bg-orange-500 text-white dark:bg-orange-600"
-                      : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  Sold ({statusCounts.sold})
-                </button>
+            {/* Info Banner */}
+            <div className={`mb-6 p-4 rounded-xl border ${
+                returnType === "customer-to-shop"
+                  ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                  : "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
+              }`}>
+              <div className="flex items-start gap-3">
+                <AlertCircle className={returnType === "customer-to-shop" ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"} size={20} />
+                <div>
+                  <h3 className={`font-semibold mb-1 ${returnType === "customer-to-shop" ? "text-blue-800 dark:text-blue-400" : "text-purple-800 dark:text-purple-400"}`}>
+                    {returnType === "customer-to-shop" ? "📋 Customer Return Process" : "📋 Warehouse Return Process"}
+                  </h3>
+                  <p className={`text-sm ${returnType === "customer-to-shop" ? "text-blue-800 dark:text-blue-300" : "text-purple-800 dark:text-purple-300"}`}>
+                    {returnType === "customer-to-shop"
+                      ? "Search invoice → Select items → Specify reason → Process return. Items will be marked as 'in-branch'."
+                      : "Scan barcodes → Specify reason → Process return. Items will be sent to warehouse."}
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* ---------------------- STOCK ITEMS ---------------------- */}
-            {loading ? (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                Loading stock items...
-              </div>
-            ) : filteredStockItems.length > 0 ? (
-              <div className="p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] mb-6">
-                <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white/90">
-                  Stock Items ({filteredStockItems.length})
-                </h3>
+            {/* Branch Selection */}
+            <div className="mb-6">
+              <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                Branch *
+              </label>
+              <select
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
+                className={inputStyle}
+                disabled={!!invoice || scannedItems.length > 0}
+              >
+                {BRANCHES.map((branch) => (
+                  <option key={branch} value={branch}>{branch}</option>
+                ))}
+              </select>
+            </div>
 
-                <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 dark:bg-white/5">
-                      <tr>
-                        {["Label", "Product", "Category", "Weight", "Status", "Price", "Action"].map((h) => (
-                          <th key={h} className="p-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-800">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {filteredStockItems.map((item) => (
-                        <tr key={item.id} className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                          <td className="p-3 font-mono text-xs text-gray-800 dark:text-white/90">{item.label}</td>
-                          <td className="p-3 text-gray-800 dark:text-white/90">{item.productName || "-"}</td>
-                          <td className="p-3 text-gray-600 dark:text-gray-400">{item.category || "-"}</td>
-                          <td className="p-3 text-gray-800 dark:text-white/90">{item.weightG || item.weight || "-"}g</td>
-                          <td className="p-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${
-                              item.status === "sold" 
-                                ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
-                                : item.status === "in-branch"
-                                ? "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
-                                : "bg-gray-100 text-gray-700 dark:bg-gray-500/20 dark:text-gray-400"
-                            }`}>
-                              {item.status?.toUpperCase() || "UNKNOWN"}
-                            </span>
-                          </td>
-                          <td className="p-3 text-gray-800 dark:text-white/90 font-medium">₹{(item.basePrice || item.costPrice || 0).toLocaleString()}</td>
-                          <td className="p-3">
-                            <button
-                              onClick={() => addToReturnList(item)}
-                              disabled={returnItems.some(ri => ri.stockItemId === item.id)}
-                              className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors dark:bg-orange-600 dark:hover:bg-orange-700"
-                            >
-                              {returnItems.some(ri => ri.stockItemId === item.id) ? "Added" : "Add to Return"}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <div className="p-8 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 rounded-xl mb-6">
-                <PackageX size={48} className="mx-auto mb-3 opacity-50" />
-                <p className="font-medium">No stock items found</p>
-                <p className="text-sm mt-1">
-                  {searchText ? "Try adjusting your search" : `No items in ${selectedBranch} matching filter: ${stockFilter}`}
-                </p>
-              </div>
-            )}
-
-            {/* ---------------------- RETURN LIST ---------------------- */}
-            {returnItems.length > 0 && (
-              <div className="p-6 rounded-2xl border-2 border-orange-500 dark:border-orange-600 bg-orange-50 dark:bg-orange-950/20">
-                <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white/90 flex items-center gap-2">
-                  <Send size={20} className="text-orange-600" /> Items to Return to Warehouse ({returnItems.length})
-                </h3>
-
-                <div className="space-y-3">
-                  {returnItems.map((item) => (
-                    <div key={item.stockItemId} className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03]">
-                      <div className="grid grid-cols-12 gap-3">
-                        {/* Item Details */}
-                        <div className="col-span-12 md:col-span-5">
-                          <div className="font-mono text-xs text-gray-500 dark:text-gray-400 mb-1">
-                            {item.label}
-                          </div>
-                          <div className="font-medium text-gray-800 dark:text-gray-200">
-                            {item.productName}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {item.category} • {item.weight}g • {item.purity}
-                          </div>
-                        </div>
-
-                        {/* Quantity */}
-                        <div className="col-span-4 md:col-span-2">
-                          <label className="text-xs text-gray-500 dark:text-gray-400">Quantity</label>
-                          <input
-                            type="number"
-                            min={1}
-                            value={item.qty}
-                            onChange={(e) => updateReturnItem(item.stockItemId, "qty", Number(e.target.value))}
-                            className="w-full px-2 py-1 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] text-sm text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
-                          />
-                        </div>
-
-                        {/* Return Reason */}
-                        <div className="col-span-8 md:col-span-4">
-                          <label className="text-xs text-gray-500 dark:text-gray-400">Return Reason *</label>
-                          <select
-                            value={item.returnReason}
-                            onChange={(e) => updateReturnItem(item.stockItemId, "returnReason", e.target.value)}
-                            className="w-full px-2 py-1 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] text-sm text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
-                          >
-                            {RETURN_REASONS.map(reason => (
-                              <option key={reason} value={reason}>{reason}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Remove Button */}
-                        <div className="col-span-12 md:col-span-1 flex items-end justify-end">
-                          <button
-                            onClick={() => removeFromReturn(item.stockItemId)}
-                            className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-xl flex items-center gap-1 text-xs font-medium transition-colors dark:bg-red-600 dark:hover:bg-red-700"
-                          >
-                            <Trash2 size={12} /> Remove
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Price Info */}
-                      <div className="mt-2 flex justify-between items-center text-sm border-t border-gray-200 dark:border-gray-800 pt-2">
-                        <span className="text-gray-600 dark:text-gray-400">
-                          Unit Price: ₹{item.price.toLocaleString()}
-                        </span>
-                        <span className="font-semibold text-gray-800 dark:text-white/90">
-                          Total: ₹{(item.price * item.qty).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* SUMMARY */}
-                <div className="mt-6 p-4 rounded-xl bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-gray-800">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                    <div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Total Items</div>
-                      <div className="text-xl font-bold text-gray-800 dark:text-white/90">{returnItems.length}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Total Quantity</div>
-                      <div className="text-xl font-bold text-gray-800 dark:text-white/90">
-                        {returnItems.reduce((sum, item) => sum + item.qty, 0)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Total Value</div>
-                      <div className="text-xl font-bold text-orange-600 dark:text-orange-400">
-                        ₹{returnItems.reduce((sum, item) => sum + (item.price * item.qty), 0).toLocaleString()}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Branch</div>
-                      <div className="text-xl font-bold text-primary dark:text-primary">{selectedBranch}</div>
-                    </div>
+            {/* CUSTOMER RETURN SECTION */}
+            {returnType === "customer-to-shop" && (
+              <>
+                {/* Invoice Search */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                      Invoice ID *
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceId}
+                      onChange={(e) => setInvoiceId(e.target.value)}
+                      placeholder="Enter invoice ID..."
+                      className={inputStyle}
+                      disabled={!!invoice}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      onClick={handleSearchInvoice}
+                      disabled={searching || !!invoice}
+                      className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <Search size={18} />
+                      Search Invoice
+                    </button>
                   </div>
                 </div>
 
-                {/* SUBMIT */}
-                <div className="mt-6 flex gap-3 justify-end">
-                  <button 
-                    onClick={() => setReturnItems([])}
-                    disabled={loading}
-                    className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-xl disabled:opacity-50 flex items-center gap-2 font-medium transition-colors dark:bg-gray-700 dark:hover:bg-gray-800"
-                  >
-                    <Trash2 size={16} /> Clear All
-                  </button>
-                  <button 
-                    onClick={submitReturn}
-                    disabled={loading}
-                    className="px-8 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl disabled:opacity-50 flex items-center gap-2 font-semibold transition-colors dark:bg-green-600 dark:hover:bg-green-700"
-                  >
-                    {loading ? (
-                      <>
-                        <RotateCcw size={16} className="animate-spin" /> Processing...
-                      </>
-                    ) : (
-                      <>
-                        <Send size={16} /> Submit Return to Warehouse
-                      </>
-                    )}
-                  </button>
+                {/* Invoice Items */}
+                {invoice && (
+                  <>
+                    <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h3 className="font-semibold text-green-800 dark:text-green-400">✅ Invoice Found</h3>
+                          <p className="text-sm text-green-700 dark:text-green-300">
+                            Customer: <strong>{invoice.customerName || "N/A"}</strong> • 
+                            Total: <strong>₹{invoice.totals.grandTotal.toLocaleString()}</strong>
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setInvoice(null);
+                            setInvoiceId("");
+                            setSelectedItems(new Set());
+                          }}
+                          className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden mb-4">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100 dark:bg-white/10">
+                          <tr className="text-left">
+                            <th className="p-3">
+                              <input
+                                type="checkbox"
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedItems(new Set(invoice.items.map(i => i.barcode)));
+                                  } else {
+                                    setSelectedItems(new Set());
+                                  }
+                                }}
+                                checked={selectedItems.size === invoice.items.length}
+                              />
+                            </th>
+                            <th className="p-3">Item</th>
+                            <th className="p-3">Barcode</th>
+                            <th className="p-3">Price</th>
+                            <th className="p-3">Reason *</th>
+                            <th className="p-3">Remarks</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {invoice.items.map((item) => (
+                            <tr key={item.barcode} className="border-b border-gray-200 dark:border-gray-800">
+                              <td className="p-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedItems.has(item.barcode)}
+                                  onChange={(e) => {
+                                    const newSet = new Set(selectedItems);
+                                    if (e.target.checked) {
+                                      newSet.add(item.barcode);
+                                    } else {
+                                      newSet.delete(item.barcode);
+                                    }
+                                    setSelectedItems(newSet);
+                                  }}
+                                />
+                              </td>
+                              <td className="p-3">
+                                <div>
+                                  <p className="font-semibold">{item.category}</p>
+                                  <p className="text-xs text-gray-500">{item.subcategory}</p>
+                                </div>
+                              </td>
+                              <td className="p-3 font-mono text-xs">{item.barcode}</td>
+                              <td className="p-3">₹{item.sellingPrice.toLocaleString()}</td>
+                              <td className="p-3">
+                                <select
+                                  value={returnReasons[item.barcode] || ""}
+                                  onChange={(e) => setReturnReasons({...returnReasons, [item.barcode]: e.target.value})}
+                                  className={inputStyle}
+                                  disabled={!selectedItems.has(item.barcode)}
+                                >
+                                  <option value="">Select reason</option>
+                                  {CUSTOMER_RETURN_REASONS.map(r => (
+                                    <option key={r} value={r}>{r}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-3">
+                                <input
+                                  type="text"
+                                  value={returnRemarks[item.barcode] || ""}
+                                  onChange={(e) => setReturnRemarks({...returnRemarks, [item.barcode]: e.target.value})}
+                                  placeholder="Optional"
+                                  className={inputStyle}
+                                  disabled={!selectedItems.has(item.barcode)}
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleProcessCustomerReturn}
+                        disabled={processing || selectedItems.size === 0}
+                        className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Save size={18} />
+                        Process Return ({selectedItems.size})
+                      </button>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* WAREHOUSE RETURN SECTION */}
+            {returnType === "shop-to-warehouse" && (
+              <>
+                {/* Barcode Scanner */}
+                <div className="mb-6">
+                  <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                    <Scan className="inline mr-1" size={16} />
+                    Scan Item Barcode
+                  </label>
+                  <BarcodeScanner
+                    onScan={handleBarcodeScan}
+                    placeholder="Scan barcode to add item for warehouse return..."
+                    disabled={scannerDisabled}
+                  />
                 </div>
+
+                {/* Scanned Items */}
+                {scannedItems.length > 0 && (
+                  <>
+                    <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden mb-4">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100 dark:bg-white/10">
+                          <tr className="text-left">
+                            <th className="p-3">Item</th>
+                            <th className="p-3">Barcode</th>
+                            <th className="p-3">Location</th>
+                            <th className="p-3">Reason *</th>
+                            <th className="p-3">Remarks</th>
+                            <th className="p-3"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scannedItems.map((item, idx) => (
+                            <tr key={idx} className="border-b border-gray-200 dark:border-gray-800">
+                              <td className="p-3">
+                                <div>
+                                  <p className="font-semibold">{item.category}</p>
+                                  <p className="text-xs text-gray-500">{item.subcategory}</p>
+                                </div>
+                              </td>
+                              <td className="p-3 font-mono text-xs">{item.barcode}</td>
+                              <td className="p-3">{item.location}</td>
+                              <td className="p-3">
+                                <select
+                                  value={warehouseReasons[item.barcode] || ""}
+                                  onChange={(e) => setWarehouseReasons({...warehouseReasons, [item.barcode]: e.target.value})}
+                                  onFocus={() => setScannerDisabled(true)}
+                                  onBlur={() => setScannerDisabled(false)}
+                                  className={inputStyle}
+                                >
+                                  <option value="">Select reason</option>
+                                  {WAREHOUSE_RETURN_REASONS.map(r => (
+                                    <option key={r} value={r}>{r}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-3">
+                                <input
+                                  type="text"
+                                  value={warehouseRemarks[item.barcode] || ""}
+                                  onChange={(e) => setWarehouseRemarks({...warehouseRemarks, [item.barcode]: e.target.value})}
+                                  onFocus={() => setScannerDisabled(true)}
+                                  onBlur={() => setScannerDisabled(false)}
+                                  placeholder="Optional"
+                                  className={inputStyle}
+                                />
+                              </td>
+                              <td className="p-3">
+                                <button
+                                  onClick={() => setScannedItems(scannedItems.filter((_, i) => i !== idx))}
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleProcessWarehouseReturn}
+                        disabled={processing}
+                        className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Save size={18} />
+                        Process Return ({scannedItems.length})
+                      </button>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* Empty State */}
+            {!invoice && scannedItems.length === 0 && (
+              <div className="p-12 text-center text-gray-500 dark:text-gray-400">
+                <RotateCcw size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="font-medium">
+                  {returnType === "customer-to-shop"
+                    ? "Search for an invoice to start processing customer returns"
+                    : "Scan barcodes to start processing warehouse returns"}
+                </p>
               </div>
             )}
           </TASection>
