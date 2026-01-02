@@ -96,7 +96,7 @@ const ShopTransfer: React.FC = () => {
       label: selectedFoundItem.label,
       category: selectedFoundItem.category,
       weight: String(selectedFoundItem.weight || ""),
-      purity: selectedFoundItem.purity,
+      purity: (selectedFoundItem as any).purity || "",
       price: selectedFoundItem.price,
       quantity: 1,
     };
@@ -418,7 +418,7 @@ const ShopTransfer: React.FC = () => {
                     >
                       <div className="font-medium">{item.label}</div>
                       <div className="text-xs text-gray-500">
-                        {item.category} • {item.weight}g • {item.purity}
+                        {item.category} • {item.weight}g • {(item as any).purity || ""}
                       </div>
                     </div>
                   ))}

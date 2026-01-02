@@ -35,11 +35,7 @@ import ShopExpenseReport from "./pages/Shops/ShopExpenseReport";
 import ShopTransfer from "./pages/Shops/ShopTransfer";
 import ShopTransferReport from "./pages/Shops/ShopTransferReport";
 import CAReport from "./pages/Shops/CAReport";
-import TestConnection from "./pages/TestConnection";
 import PrintBarcodes from "./pages/PrintBarcodes";
-import WarehouseDiagnostic from "./pages/WarehouseDiagnostic";
-import TestFirestore from "./pages/TestFirestore";
-import MigrateWarehouse from "./pages/MigrateWarehouse";
 import AppSettingsPage from "./pages/Settings/AppSettings";
 import { AuthProvider } from "./context/AuthContext";
 import { ShopProvider } from "./context/ShopContext";
@@ -94,12 +90,6 @@ export default function App() {
               <Route path="/warehouse/reports" element={<WarehouseReports />} />
               <Route path="/warehouse/returns" element={<Returns />} />
               <Route path="/warehouse/returned-items" element={<ReturnedItems />} />
-              <Route path="/warehouse/diagnostic" element={<WarehouseDiagnostic />} />
-
-              <Route path="/test-firestore" element={<TestFirestore />} />
-              <Route path="/migrate-warehouse" element={<MigrateWarehouse />} />
-
-              <Route path="/test-connection" element={<TestConnection />} />
 
               {/* Shops */}
               <Route path="/shops/branch-stock" element={<BranchStock />} />

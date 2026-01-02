@@ -122,7 +122,7 @@ export async function performShopTransfer(
     // Get source shop stock
     const sourceStockRef = collection(db, "shops", fromShop, "stockItems");
     const sourceSnap = await getDocs(sourceStockRef);
-    const sourceStock = sourceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const sourceStock = sourceSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any));
     
     console.log("Source stock loaded:", sourceStock.length, "items");
 
@@ -131,7 +131,7 @@ export async function performShopTransfer(
       console.log("Processing row:", row.label);
       
       // Find item in source shop by label
-      const sourceItem = sourceStock.find((item: any) => item.label === row.label);
+      const sourceItem = sourceStock.find((item) => item.label === row.label);
 
       if (!sourceItem) {
         console.warn("Item not found in source:", row.label);
