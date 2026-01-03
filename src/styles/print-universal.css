@@ -1,0 +1,155 @@
+/* =====================================================
+   UNIVERSAL PRINT STYLES - BALANCED & WORKING
+   ===================================================== */
+
+@media print {
+  /* Page setup */
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+
+  /* Reset */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    font-family: Arial, sans-serif !important;
+    font-size: 10pt !important;
+    color: #000 !important;
+  }
+
+  /* Hide screen elements */
+  .no-print,
+  button,
+  input,
+  textarea,
+  select,
+  nav,
+  aside,
+  .sidebar,
+  header:not(.print-header),
+  svg:not(.barcode-svg),
+  img:not(.print-logo) {
+    display: none !important;
+  }
+
+  /* Show print content */
+  .print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  .print-only * {
+    visibility: visible !important;
+  }
+
+  /* Table display fix */
+  .print-only table {
+    display: table !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .print-only thead {
+    display: table-header-group !important;
+  }
+
+  .print-only tbody {
+    display: table-row-group !important;
+  }
+
+  .print-only tfoot {
+    display: table-footer-group !important;
+  }
+
+  .print-only tr {
+    display: table-row !important;
+  }
+
+  .print-only th,
+  .print-only td {
+    display: table-cell !important;
+  }
+
+  /* Header */
+  .print-header {
+    text-align: center !important;
+    margin-bottom: 5mm !important;
+    padding-bottom: 3mm !important;
+    border-bottom: 2px solid #000 !important;
+  }
+
+  .print-header h1 {
+    font-size: 18pt !important;
+    font-weight: bold !important;
+    margin: 0 0 3mm 0 !important;
+  }
+
+  .print-header p {
+    font-size: 9pt !important;
+    margin: 1mm 0 !important;
+  }
+
+  /* Tables */
+  .print-only table {
+    margin: 3mm 0 !important;
+    font-size: 9pt !important;
+  }
+
+  .print-only th {
+    background-color: #e5e7eb !important;
+    border: 1px solid #000 !important;
+    padding: 2mm !important;
+    font-weight: bold !important;
+  }
+
+  .print-only td {
+    border: 1px solid #000 !important;
+    padding: 2mm !important;
+  }
+
+  .print-only tfoot tr {
+    background-color: #f3f4f6 !important;
+    font-weight: bold !important;
+  }
+
+  /* Totals */
+  .print-totals {
+    margin: 3mm 0 !important;
+    padding: 3mm !important;
+    border: 2px solid #000 !important;
+    font-size: 9pt !important;
+  }
+
+  /* Signatures */
+  .print-signatures {
+    display: flex !important;
+    justify-content: space-between !important;
+    margin-top: 10mm !important;
+  }
+
+  .print-signature {
+    width: 40% !important;
+    text-align: center !important;
+  }
+
+  .print-signature-line {
+    border-top: 1px solid #000 !important;
+    margin-top: 8mm !important;
+    padding-top: 2mm !important;
+  }
+}
+
+@media screen {
+  .print-only {
+    display: none !important;
+  }
+}

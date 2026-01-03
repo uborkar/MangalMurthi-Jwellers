@@ -170,34 +170,34 @@ export default function SalesReport() {
   // Calculate statistics
   const stats: SalesStats = useMemo(() => {
     const baseStats = {
-      totalSales: invoices.length,
-      totalRevenue: invoices.reduce((sum, inv) => sum + inv.totals.grandTotal, 0),
+      totalSales: invoices.length || 0,
+      totalRevenue: invoices.reduce((sum, inv) => sum + (inv.totals?.grandTotal || 0), 0),
       totalItems: invoices.reduce(
-        (sum, inv) => sum + inv.items.reduce((s, item) => s + item.qty, 0),
+        (sum, inv) => sum + (inv.items?.reduce((s, item) => s + (item.qty || 0), 0) || 0),
         0
       ),
       totalCustomers: new Set(invoices.map((inv) => inv.customerPhone || inv.customerName))
-        .size,
+        .size || 0,
       avgOrderValue:
         invoices.length > 0
-          ? invoices.reduce((sum, inv) => sum + inv.totals.grandTotal, 0) / invoices.length
+          ? invoices.reduce((sum, inv) => sum + (inv.totals?.grandTotal || 0), 0) / invoices.length
           : 0,
-      totalDiscount: invoices.reduce((sum, inv) => sum + inv.totals.totalDiscount, 0),
-      totalGST: invoices.reduce((sum, inv) => sum + inv.totals.gst, 0),
+      totalDiscount: invoices.reduce((sum, inv) => sum + (inv.totals?.totalDiscount || 0), 0),
+      totalGST: invoices.reduce((sum, inv) => sum + (inv.totals?.gst || 0), 0),
     };
 
     // Add ledger stats
     const bookings = ledgerEntries.filter((e) => e.type === "booking");
     const totalAdvances = bookings.reduce((sum, e) => sum + (e.advanceAmount || 0), 0);
     const totalPending = ledgerEntries.reduce((sum, e) => sum + (e.pendingAmount || 0), 0);
-    const ledgerBalance = ledgerEntries.reduce((sum, e) => sum + e.debit - e.credit, 0);
+    const ledgerBalance = ledgerEntries.reduce((sum, e) => sum + (e.debit || 0) - (e.credit || 0), 0);
 
     return {
       ...baseStats,
-      totalBookings: bookings.length,
-      totalAdvances,
-      totalPending,
-      ledgerBalance,
+      totalBookings: bookings.length || 0,
+      totalAdvances: totalAdvances || 0,
+      totalPending: totalPending || 0,
+      ledgerBalance: ledgerBalance || 0,
     };
   }, [invoices, ledgerEntries]);
 

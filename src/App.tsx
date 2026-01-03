@@ -30,6 +30,7 @@ import Billing from "./pages/Shops/Billing";
 import SalesBooking from "./pages/Shops/SalesBooking";
 import SalesReport from "./pages/Shops/SalesReport";
 import SalesReturn from "./pages/Shops/SalesReturn";
+import ReturnReport from "./pages/Shops/ReturnReport";
 import ShopExpense from "./pages/Shops/ShopExpense";
 import ShopExpenseReport from "./pages/Shops/ShopExpenseReport";
 import ShopTransfer from "./pages/Shops/ShopTransfer";
@@ -97,6 +98,7 @@ export default function App() {
               <Route path="/shops/sale-booking" element={<SalesBooking />} />
               <Route path="/shops/sales-report" element={<SalesReport />} />
               <Route path="/shops/sales-return" element={<SalesReturn />} />
+              <Route path="/shops/return-report" element={<ReturnReport />} />
               <Route path="/shops/shop-expense" element={<ShopExpense />} />
               <Route path="/shops/shop-expense-report" element={<ShopExpenseReport />} />
               <Route path="/shops/shop-transfer" element={<ShopTransfer />} />

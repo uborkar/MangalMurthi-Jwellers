@@ -1,0 +1,345 @@
+/* =====================================================
+   PROFESSIONAL INVOICE PRINT STYLES
+   Industry Standard - CA Approved - GST Compliant
+   ===================================================== */
+
+@media print {
+  /* ==================== PAGE SETUP ==================== */
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+
+  /* ==================== RESET ==================== */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    font-family: 'Arial', 'Helvetica', sans-serif !important;
+    font-size: 10pt !important;
+    line-height: 1.4 !important;
+    color: #000 !important;
+  }
+
+  /* ==================== HIDE SCREEN UI ==================== */
+  .no-print,
+  button,
+  input,
+  textarea,
+  select,
+  nav,
+  aside,
+  .sidebar,
+  header:not(.invoice-header),
+  svg:not(.barcode-svg),
+  [role="navigation"] {
+    display: none !important;
+  }
+
+  /* ==================== SHOW INVOICE ==================== */
+  .invoice-print {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: 180mm !important;
+    margin: 0 auto !important;
+  }
+
+  .invoice-print * {
+    visibility: visible !important;
+  }
+
+  /* ==================== SECTION 1: HEADER ==================== */
+  .invoice-header {
+    text-align: center !important;
+    margin-bottom: 5mm !important;
+    padding-bottom: 4mm !important;
+    border-bottom: 1.5pt solid #000 !important;
+  }
+
+  .invoice-header .company-name {
+    font-size: 16pt !important;
+    font-weight: bold !important;
+    margin: 0 0 2mm 0 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5pt !important;
+  }
+
+  .invoice-header .company-address {
+    font-size: 9pt !important;
+    margin: 1mm 0 !important;
+    line-height: 1.3 !important;
+  }
+
+  .invoice-header .company-gst {
+    font-size: 9pt !important;
+    margin: 2mm 0 1mm 0 !important;
+    font-weight: 600 !important;
+  }
+
+  .invoice-header .document-type {
+    font-size: 11pt !important;
+    font-weight: bold !important;
+    margin: 3mm 0 0 0 !important;
+    text-transform: uppercase !important;
+  }
+
+  /* ==================== SECTION 2: META INFO ==================== */
+  .invoice-meta {
+    display: table !important;
+    width: 100% !important;
+    margin: 4mm 0 !important;
+    font-size: 9pt !important;
+  }
+
+  .invoice-meta-row {
+    display: table-row !important;
+  }
+
+  .invoice-meta-label {
+    display: table-cell !important;
+    width: 25% !important;
+    padding: 1mm 0 !important;
+    font-weight: 600 !important;
+  }
+
+  .invoice-meta-value {
+    display: table-cell !important;
+    width: 25% !important;
+    padding: 1mm 0 !important;
+  }
+
+  /* ==================== SECTION 3: ITEMS TABLE ==================== */
+  .invoice-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin: 4mm 0 !important;
+    font-size: 9pt !important;
+  }
+
+  .invoice-table thead {
+    display: table-header-group !important;
+  }
+
+  .invoice-table tbody {
+    display: table-row-group !important;
+  }
+
+  .invoice-table tfoot {
+    display: table-footer-group !important;
+  }
+
+  .invoice-table tr {
+    display: table-row !important;
+  }
+
+  .invoice-table th,
+  .invoice-table td {
+    display: table-cell !important;
+  }
+
+  .invoice-table th {
+    background-color: #e8e8e8 !important;
+    border: 0.5pt solid #000 !important;
+    padding: 2mm !important;
+    font-weight: bold !important;
+    text-align: left !important;
+    font-size: 9pt !important;
+  }
+
+  .invoice-table td {
+    border: 0.5pt solid #000 !important;
+    padding: 2mm !important;
+    vertical-align: top !important;
+  }
+
+  /* Column alignments */
+  .invoice-table .col-sno {
+    width: 8% !important;
+    text-align: center !important;
+  }
+
+  .invoice-table .col-item {
+    width: 25% !important;
+    text-align: left !important;
+  }
+
+  .invoice-table .col-hsn {
+    width: 10% !important;
+    text-align: center !important;
+  }
+
+  .invoice-table .col-remark {
+    width: 15% !important;
+    text-align: left !important;
+  }
+
+  .invoice-table .col-pcs {
+    width: 8% !important;
+    text-align: center !important;
+  }
+
+  .invoice-table .col-weight {
+    width: 12% !important;
+    text-align: right !important;
+  }
+
+  .invoice-table .col-rate {
+    width: 12% !important;
+    text-align: right !important;
+  }
+
+  .invoice-table .col-amount {
+    width: 12% !important;
+    text-align: right !important;
+  }
+
+  /* ==================== SECTION 4: TOTALS ==================== */
+  .invoice-totals {
+    width: 50% !important;
+    margin: 4mm 0 4mm auto !important;
+    font-size: 9pt !important;
+  }
+
+  .invoice-totals-row {
+    display: flex !important;
+    justify-content: space-between !important;
+    padding: 1mm 0 !important;
+  }
+
+  .invoice-totals-row.subtotal {
+    border-top: 0.5pt solid #000 !important;
+    padding-top: 2mm !important;
+  }
+
+  .invoice-totals-row.total {
+    border-top: 1pt solid #000 !important;
+    margin-top: 2mm !important;
+    padding-top: 2mm !important;
+    font-weight: bold !important;
+    font-size: 10pt !important;
+  }
+
+  .invoice-totals-label {
+    text-align: left !important;
+  }
+
+  .invoice-totals-value {
+    text-align: right !important;
+    min-width: 30mm !important;
+  }
+
+  /* ==================== SECTION 5: PAYMENT ==================== */
+  .invoice-payment {
+    margin: 4mm 0 !important;
+    padding: 3mm !important;
+    border: 0.5pt solid #000 !important;
+    font-size: 9pt !important;
+  }
+
+  .invoice-payment-title {
+    font-weight: bold !important;
+    margin-bottom: 2mm !important;
+  }
+
+  .invoice-payment-row {
+    display: flex !important;
+    justify-content: space-between !important;
+    padding: 1mm 0 !important;
+  }
+
+  /* ==================== SECTION 6: FOOTER ==================== */
+  .invoice-footer {
+    margin-top: 8mm !important;
+    font-size: 9pt !important;
+  }
+
+  .invoice-amount-words {
+    margin-bottom: 4mm !important;
+    padding: 2mm !important;
+    border: 0.5pt solid #000 !important;
+  }
+
+  .invoice-amount-words strong {
+    font-weight: bold !important;
+  }
+
+  .invoice-signatures {
+    display: flex !important;
+    justify-content: space-between !important;
+    margin-top: 10mm !important;
+  }
+
+  .invoice-signature {
+    width: 40% !important;
+    text-align: center !important;
+  }
+
+  .invoice-signature-line {
+    border-top: 0.5pt solid #000 !important;
+    margin-top: 12mm !important;
+    padding-top: 2mm !important;
+  }
+
+  /* ==================== UTILITIES ==================== */
+  .text-left { text-align: left !important; }
+  .text-center { text-align: center !important; }
+  .text-right { text-align: right !important; }
+  .font-bold { font-weight: bold !important; }
+  .font-normal { font-weight: normal !important; }
+
+  /* ==================== CLEAN RENDERING ==================== */
+  * {
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+  }
+
+  /* Remove all unnecessary spacing */
+  p, div, span {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Ensure clean page breaks */
+  .invoice-print {
+    page-break-inside: avoid !important;
+  }
+
+  .invoice-table {
+    page-break-inside: auto !important;
+  }
+
+  .invoice-table tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+}
+
+/* ==================== SCREEN PREVIEW ==================== */
+@media screen {
+  .invoice-print {
+    display: none !important;
+  }
+
+  /* Optional: Preview mode */
+  .preview-mode .invoice-print {
+    display: block !important;
+    max-width: 210mm !important;
+    margin: 20px auto !important;
+    padding: 20px !important;
+    background: white !important;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1) !important;
+  }
+
+  .preview-mode .no-print {
+    display: none !important;
+  }
+}

@@ -13,6 +13,7 @@ import BarcodeScanner from "../../components/common/BarcodeScanner";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import { getItemByBarcode } from "../../firebase/warehouseItems";
 import { createBookingLedgerEntry } from "../../firebase/ledger";
+import { useShop } from "../../context/ShopContext";
 
 type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
@@ -30,47 +31,90 @@ interface BookingItem {
 const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
 export default function SalesBooking() {
-  const [selectedBranch, setSelectedBranch] = useState<BranchName>("Sangli");
+  const { branchStockCache, setBranchStockCache, currentBooking, updateBooking, clearBooking } = useShop();
   
-  // Customer Details
-  const [partyName, setPartyName] = useState("");
-  const [mobileNo, setMobileNo] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState<BranchName>(currentBooking.branch);
+  
+  // Customer Details - Initialize from context
+  const [partyName, setPartyName] = useState(currentBooking.partyName);
+  const [mobileNo, setMobileNo] = useState(currentBooking.mobileNo);
+  const [deliveryDate, setDeliveryDate] = useState(currentBooking.deliveryDate);
   
   // Salesperson
-  const [salespersonName, setSalespersonName] = useState("");
+  const [salespersonName, setSalespersonName] = useState(currentBooking.salespersonName);
   
-  // Booking Items
-  const [bookingItems, setBookingItems] = useState<BookingItem[]>([]);
+  // Booking Items - Initialize from context
+  const [bookingItems, setBookingItems] = useState<BookingItem[]>(currentBooking.items);
   
   // Branch Stock
-  const [branchStock, setBranchStock] = useState<BranchStockItem[]>([]);
+  const [branchStock, setBranchStock] = useState<BranchStockItem[]>(branchStockCache[selectedBranch] || []);
   const [loading, setLoading] = useState(false);
   
-  // Payment Details
-  const [netAmount, setNetAmount] = useState(0); // User enters this
-  const [cashAdvance, setCashAdvance] = useState(0);
-  const [pendingAmount, setPendingAmount] = useState(0);
-  const [totalAmount, setTotalAmount] = useState(0); // Calculated from items
+  // Payment Details - Initialize from context
+  const [netAmount, setNetAmount] = useState(currentBooking.netAmount);
+  const [cashAdvance, setCashAdvance] = useState(currentBooking.cashAdvance);
+  const [pendingAmount, setPendingAmount] = useState(currentBooking.pendingAmount);
+  const [totalAmount, setTotalAmount] = useState(0);
   
   // Additional Info
-  const [remarks, setRemarks] = useState("");
+  const [remarks, setRemarks] = useState(currentBooking.remarks);
   
   // History
   const [showHistory, setShowHistory] = useState(false);
   const [lastBooking, setLastBooking] = useState<any>(null);
 
-  // Load branch stock
+  // Preview Modal
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [savedBookingData, setSavedBookingData] = useState<any>(null);
+
+  // Sync with context whenever booking data changes (with debounce)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      try {
+        updateBooking({
+          branch: selectedBranch,
+          items: bookingItems,
+          partyName,
+          mobileNo,
+          deliveryDate,
+          salespersonName,
+          netAmount,
+          cashAdvance,
+          pendingAmount,
+          remarks,
+        });
+      } catch (error) {
+        console.error("Error updating booking context:", error);
+      }
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [bookingItems, selectedBranch, partyName, mobileNo, deliveryDate, salespersonName, netAmount, cashAdvance, pendingAmount, remarks]);
+
+  // Load branch stock (with caching)
   useEffect(() => {
     loadBranchStock();
   }, [selectedBranch]);
 
   const loadBranchStock = async () => {
+    // Check cache first
+    if (branchStockCache[selectedBranch] && branchStockCache[selectedBranch].length > 0) {
+      const available = branchStockCache[selectedBranch].filter((s) => s.status === "in-branch" || !s.status);
+      setBranchStock(available);
+      console.log(`✅ Loaded ${available.length} items from cache for ${selectedBranch}`);
+      return;
+    }
+
+    // Load from Firebase
     setLoading(true);
     try {
       const stock = await getShopStock(selectedBranch);
+      
+      // Cache all items
+      setBranchStockCache(selectedBranch, stock);
+      
       // Filter only available items
-      const available = stock.filter((s) => s.status === "in-branch");
+      const available = stock.filter((s) => s.status === "in-branch" || !s.status);
       setBranchStock(available);
       toast.success(`Loaded ${available.length} items from ${selectedBranch}`);
     } catch (error) {
@@ -276,7 +320,54 @@ export default function SalesBooking() {
         toast("⚠️ Booking saved but ledger entry failed", { duration: 3000 });
       }
 
-      // Reset form
+      // Save booking data for preview
+      setSavedBookingData({
+        bookingNo,
+        bookingId,
+        branch: selectedBranch,
+        partyName,
+        mobileNo,
+        deliveryDate,
+        salespersonName,
+        items: bookingItems,
+        totalAmount,
+        netAmount,
+        cashAdvance,
+        pendingAmount,
+        remarks,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Show preview modal
+      setShowPreviewModal(true);
+
+    } catch (error) {
+      console.error("Error saving booking:", error);
+      toast.dismiss(loadingToast);
+      toast.error("Failed to save booking");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle print from modal
+  const handlePrintBooking = () => {
+    setShowPreviewModal(false);
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  // Close modal and optionally clear
+  const handleCloseModal = () => {
+    setShowPreviewModal(false);
+    
+    const shouldClear = window.confirm(
+      "Do you want to clear the form and start a new booking?"
+    );
+
+    if (shouldClear) {
+      clearBooking();
       setPartyName("");
       setMobileNo("");
       setDeliveryDate("");
@@ -287,12 +378,6 @@ export default function SalesBooking() {
       setPendingAmount(0);
       setTotalAmount(0);
       setRemarks("");
-    } catch (error) {
-      console.error("Error saving booking:", error);
-      toast.dismiss(loadingToast);
-      toast.error("Failed to save booking");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -612,51 +697,35 @@ export default function SalesBooking() {
                 </button>
               </div>
 
-              {/* Print Header (only visible when printing) */}
-              <div className="hidden print:block mb-6">
-                <h1 className="text-2xl font-bold text-center mb-4">SALES BOOKING</h1>
-                <div className="grid grid-cols-2 gap-4 text-sm mb-4">
-                  <div>
-                    <p><strong>Branch:</strong> {selectedBranch}</p>
-                    <p><strong>Party Name:</strong> {partyName}</p>
-                    <p><strong>Mobile:</strong> {mobileNo}</p>
-                  </div>
-                  <div>
-                    <p><strong>Date:</strong> {new Date().toLocaleDateString()}</p>
-                    <p><strong>Delivery Date:</strong> {deliveryDate}</p>
-                    <p><strong>Salesperson:</strong> {salespersonName}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+              {/* Editable Table */}
+              <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-white/5">
-                    <tr className="text-left font-semibold text-gray-700 dark:text-gray-300">
-                      <th className="p-3">SNO</th>
-                      <th className="p-3">Item Name *</th>
-                      <th className="p-3">Stone/Sapphire</th>
-                      <th className="p-3">Tr No</th>
-                      <th className="p-3">Pcs</th>
-                      <th className="p-3">Weight *</th>
-                      <th className="p-3">Total</th>
-                      <th className="p-3"></th>
+                  <thead>
+                    <tr className="border-b-2 border-gray-300 dark:border-gray-700">
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">SNO</th>
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">ITEM NAME *</th>
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">STONE/SAPPHIRE</th>
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">TR NO</th>
+                      <th className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">PCS</th>
+                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">WEIGHT *</th>
+                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">TOTAL</th>
+                      <th className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50 no-print">ACTION</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bookingItems.map((item, idx) => (
                       <tr
                         key={item.id}
-                        className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
+                        className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
                       >
-                        <td className="p-3">{idx + 1}</td>
+                        <td className="p-3 font-medium text-gray-700 dark:text-gray-300">{idx + 1}</td>
                         <td className="p-3">
                           <input
                             type="text"
                             value={item.itemName}
                             onChange={(e) => updateItem(item.id, "itemName", e.target.value)}
-                            placeholder="Item name"
-                            className="w-full px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                            placeholder="Enter item name"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
                         <td className="p-3">
@@ -664,8 +733,8 @@ export default function SalesBooking() {
                             type="text"
                             value={item.stoneSapphire}
                             onChange={(e) => updateItem(item.id, "stoneSapphire", e.target.value)}
-                            placeholder="Stone/Sapphire"
-                            className="w-full px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                            placeholder="Stone/Sapphire details"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
                         <td className="p-3">
@@ -674,10 +743,10 @@ export default function SalesBooking() {
                             value={item.trNo}
                             onChange={(e) => updateItem(item.id, "trNo", e.target.value)}
                             placeholder="Tr No"
-                            className="w-20 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                            className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
-                        <td className="p-3">
+                        <td className="p-3 text-center">
                           <input
                             type="number"
                             value={item.pieces}
@@ -685,7 +754,7 @@ export default function SalesBooking() {
                               updateItem(item.id, "pieces", Number(e.target.value));
                               calculateTotals();
                             }}
-                            className="w-16 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                            className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
                             min="1"
                           />
                         </td>
@@ -697,15 +766,18 @@ export default function SalesBooking() {
                               updateItem(item.id, "weight", e.target.value);
                               calculateTotals();
                             }}
-                            placeholder="Weight"
-                            className="w-20 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                            placeholder="0.00"
+                            className="w-28 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-right focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
-                        <td className="p-3 font-semibold">{item.total.toFixed(2)}</td>
-                        <td className="p-3">
+                        <td className="p-3 text-right font-semibold text-gray-900 dark:text-white">
+                          {item.total.toFixed(2)}
+                        </td>
+                        <td className="p-3 text-center no-print">
                           <button
                             onClick={() => removeItem(item.id)}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded dark:hover:bg-red-900/20"
+                            className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                            title="Remove item"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -715,135 +787,130 @@ export default function SalesBooking() {
 
                     {bookingItems.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="p-8 text-center text-gray-500">
+                        <td colSpan={8} className="p-8 text-center text-gray-500 dark:text-gray-400">
                           <Package size={48} className="mx-auto mb-2 opacity-50" />
                           <p>No items added. Scan barcode or click "Add Item" to start.</p>
                         </td>
                       </tr>
                     )}
                   </tbody>
+                  
+                  {/* Totals Footer */}
+                  {bookingItems.length > 0 && (
+                    <tfoot className="border-t-2 border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <td colSpan={6} className="p-3 text-right font-bold text-gray-700 dark:text-gray-300">
+                          TOTAL AMOUNT:
+                        </td>
+                        <td className="p-3 text-right font-bold text-lg text-primary">
+                          ₹{totalAmount.toFixed(2)}
+                        </td>
+                        <td className="no-print"></td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
-
-              {/* Print Footer (only visible when printing) */}
-              {bookingItems.length > 0 && (
-                <div className="hidden print:block mt-6">
-                  <div className="grid grid-cols-2 gap-4 text-sm border-t pt-4">
-                    <div></div>
-                    <div>
-                      <div className="flex justify-between mb-2">
-                        <span>Items Total:</span>
-                        <span className="font-semibold">₹{totalAmount.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between mb-2">
-                        <span>Net Amount:</span>
-                        <span className="font-semibold">₹{netAmount.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between mb-2">
-                        <span>Cash Advance:</span>
-                        <span className="font-semibold text-green-600">₹{cashAdvance.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between border-t pt-2">
-                        <span className="font-bold">Pending Amount:</span>
-                        <span className="font-bold text-red-600">₹{pendingAmount.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  {remarks && (
-                    <div className="mt-4 p-3 border rounded">
-                      <p className="text-xs font-semibold">Remarks:</p>
-                      <p className="text-sm">{remarks}</p>
-                    </div>
-                  )}
-                  <div className="mt-8 grid grid-cols-2 gap-8">
-                    <div className="text-center border-t pt-2">
-                      <p className="text-sm">Customer Signature</p>
-                    </div>
-                    <div className="text-center border-t pt-2">
-                      <p className="text-sm">Authorized Signature</p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Payment Details */}
             {bookingItems.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 no-print">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                    Additional Remarks
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                <div className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                  <label className="block text-sm font-semibold mb-2 text-blue-900 dark:text-blue-300">
+                    Net Amount *
                   </label>
-                  <textarea
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="Enter any additional notes or special instructions..."
-                    rows={4}
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                    <input
+                      type="number"
+                      value={netAmount}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setNetAmount(val);
+                        setPendingAmount(val - cashAdvance);
+                      }}
+                      placeholder="0.00"
+                      className="w-full pl-8 pr-3 py-3 border-2 border-blue-300 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      step="0.01"
+                    />
+                  </div>
+                  <p className="text-xs text-blue-700 dark:text-blue-400 mt-2">
+                    Final agreed amount with customer
+                  </p>
                 </div>
 
-                <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-6 border border-gray-200 dark:border-gray-800">
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Payment Summary</h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Items Total:</span>
-                      <span className="font-semibold">₹{totalAmount.toFixed(2)}</span>
-                    </div>
-                    
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Net Amount:</span>
-                      <input
-                        type="number"
-                        value={netAmount}
-                        onChange={(e) => {
-                          const net = Number(e.target.value);
-                          setNetAmount(net);
-                          setPendingAmount(net - cashAdvance);
-                        }}
-                        className="w-32 px-3 py-1 border rounded text-right dark:bg-gray-800 dark:border-gray-700"
-                        min="0"
-                        placeholder="Enter amount"
-                      />
-                    </div>
-                    
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Cash Advance:</span>
-                      <input
-                        type="number"
-                        value={cashAdvance}
-                        onChange={(e) => {
-                          const advance = Number(e.target.value);
-                          setCashAdvance(advance);
-                          setPendingAmount(netAmount - advance);
-                        }}
-                        className="w-32 px-3 py-1 border rounded text-right dark:bg-gray-800 dark:border-gray-700"
-                        min="0"
-                        max={netAmount}
-                      />
-                    </div>
-
-                    <div className="border-t border-gray-300 dark:border-gray-700 pt-3">
-                      <div className="flex justify-between items-center">
-                        <span className="font-semibold text-gray-900 dark:text-white">Pending Amt:</span>
-                        <span className="font-bold text-xl text-red-600 dark:text-red-400">
-                          ₹{pendingAmount.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
+                <div className="p-6 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl border border-green-200 dark:border-green-800">
+                  <label className="block text-sm font-semibold mb-2 text-green-900 dark:text-green-300">
+                    Cash Advance
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                    <input
+                      type="number"
+                      value={cashAdvance}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setCashAdvance(val);
+                        setPendingAmount(netAmount - val);
+                      }}
+                      placeholder="0.00"
+                      className="w-full pl-8 pr-3 py-3 border-2 border-green-300 dark:border-green-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-green-500"
+                      step="0.01"
+                    />
                   </div>
-
-                  <div className="mt-6">
-                    <button
-                      onClick={handleSaveBooking}
-                      disabled={loading || bookingItems.length === 0}
-                      className="w-full px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Save size={18} />
-                      {loading ? "Saving..." : "Save Booking"}
-                    </button>
-                  </div>
+                  <p className="text-xs text-green-700 dark:text-green-400 mt-2">
+                    Amount paid in advance
+                  </p>
                 </div>
+
+                <div className="p-6 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl border border-orange-200 dark:border-orange-800">
+                  <label className="block text-sm font-semibold mb-2 text-orange-900 dark:text-orange-300">
+                    Pending Amount
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                    <input
+                      type="number"
+                      value={pendingAmount}
+                      readOnly
+                      className="w-full pl-8 pr-3 py-3 border-2 border-orange-300 dark:border-orange-700 rounded-lg bg-orange-50 dark:bg-orange-900/30 text-gray-900 dark:text-white text-lg font-semibold cursor-not-allowed"
+                    />
+                  </div>
+                  <p className="text-xs text-orange-700 dark:text-orange-400 mt-2">
+                    Balance to be collected
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Remarks */}
+            {bookingItems.length > 0 && (
+              <div className="mb-6">
+                <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                  Remarks / Special Instructions
+                </label>
+                <textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder="Add any special instructions or notes..."
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+            )}
+
+            {/* Save Button */}
+            {bookingItems.length > 0 && (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveBooking}
+                  disabled={loading}
+                  className="px-8 py-4 bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-white rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
+                >
+                  <Save size={24} />
+                  {loading ? "Saving..." : "Save Booking"}
+                </button>
               </div>
             )}
 
@@ -967,26 +1034,162 @@ export default function SalesBooking() {
         </div>
       </div>
 
-      {/* Print Styles */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          .print-area, .print-area * {
-            visibility: visible;
-          }
-          .print-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-          }
-          button, .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
+      {/* Preview Modal (Like Distribution Challan) */}
+      {showPreviewModal && savedBookingData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                📋 Booking Preview
+              </h2>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handlePrintBooking}
+                  className="px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-semibold transition-colors flex items-center gap-2"
+                >
+                  <Printer size={20} />
+                  Print
+                </button>
+                <button
+                  onClick={handleCloseModal}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content - Professional Preview */}
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
+              <div className="invoice-print bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 max-w-[210mm] mx-auto">
+                {/* SECTION 1: HEADER */}
+                <div className="invoice-header">
+                  <div className="company-name">SALES BOOKING</div>
+                  <div className="company-address">
+                    Branch: {savedBookingData.branch}
+                  </div>
+                </div>
+
+                {/* SECTION 2: META INFO */}
+                <div className="invoice-meta">
+                  <div className="invoice-meta-row">
+                    <div className="invoice-meta-label">Booking No:</div>
+                    <div className="invoice-meta-value">{savedBookingData.bookingNo}</div>
+                    <div className="invoice-meta-label">Date:</div>
+                    <div className="invoice-meta-value">{new Date(savedBookingData.createdAt).toLocaleDateString()}</div>
+                  </div>
+                  <div className="invoice-meta-row">
+                    <div className="invoice-meta-label">Party Name:</div>
+                    <div className="invoice-meta-value">{savedBookingData.partyName}</div>
+                    <div className="invoice-meta-label">Mobile:</div>
+                    <div className="invoice-meta-value">{savedBookingData.mobileNo}</div>
+                  </div>
+                  <div className="invoice-meta-row">
+                    <div className="invoice-meta-label">Delivery Date:</div>
+                    <div className="invoice-meta-value">{savedBookingData.deliveryDate}</div>
+                    <div className="invoice-meta-label">Salesperson:</div>
+                    <div className="invoice-meta-value">{savedBookingData.salespersonName}</div>
+                  </div>
+                </div>
+
+                {/* SECTION 3: ITEMS TABLE */}
+                <table className="invoice-table">
+                  <thead>
+                    <tr>
+                      <th className="col-sno">#</th>
+                      <th className="col-item">ITEM NAME</th>
+                      <th className="col-remark">STONE/SAPPHIRE</th>
+                      <th className="col-hsn">TR NO</th>
+                      <th className="col-pcs">PCS</th>
+                      <th className="col-weight">WEIGHT</th>
+                      <th className="col-amount">TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedBookingData.items.map((item: any, idx: number) => (
+                      <tr key={idx}>
+                        <td className="col-sno">{idx + 1}</td>
+                        <td className="col-item">{item.itemName}</td>
+                        <td className="col-remark">{item.stoneSapphire}</td>
+                        <td className="col-hsn">{item.trNo}</td>
+                        <td className="col-pcs">{item.pieces}</td>
+                        <td className="col-weight">{item.weight}</td>
+                        <td className="col-amount">₹{item.total.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* SECTION 4: TOTALS */}
+                <div className="invoice-totals">
+                  <div className="invoice-totals-row subtotal">
+                    <div className="invoice-totals-label">Items Total:</div>
+                    <div className="invoice-totals-value">₹{savedBookingData.totalAmount.toFixed(2)}</div>
+                  </div>
+                  <div className="invoice-totals-row">
+                    <div className="invoice-totals-label">Net Amount:</div>
+                    <div className="invoice-totals-value">₹{savedBookingData.netAmount.toFixed(2)}</div>
+                  </div>
+                  <div className="invoice-totals-row">
+                    <div className="invoice-totals-label">Cash Advance:</div>
+                    <div className="invoice-totals-value">₹{savedBookingData.cashAdvance.toFixed(2)}</div>
+                  </div>
+                  <div className="invoice-totals-row total">
+                    <div className="invoice-totals-label">Pending Amount:</div>
+                    <div className="invoice-totals-value">₹{savedBookingData.pendingAmount.toFixed(2)}</div>
+                  </div>
+                </div>
+
+                {/* SECTION 5: REMARKS */}
+                {savedBookingData.remarks && (
+                  <div className="invoice-payment">
+                    <div className="invoice-payment-title">REMARKS</div>
+                    <div>{savedBookingData.remarks}</div>
+                  </div>
+                )}
+
+                {/* SECTION 6: FOOTER */}
+                <div className="invoice-footer">
+                  <div className="invoice-signatures">
+                    <div className="invoice-signature">
+                      <div className="invoice-signature-line">Customer Signature</div>
+                    </div>
+                    <div className="invoice-signature">
+                      <div className="invoice-signature-line">
+                        Authorized Signatory
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Review booking before printing
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCloseModal}
+                  className="px-6 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-xl font-medium transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handlePrintBooking}
+                  className="px-6 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl font-semibold transition-colors flex items-center gap-2"
+                >
+                  <Printer size={18} />
+                  Print Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </>
   );
 }

@@ -1,5 +1,5 @@
 // src/pages/Shops/SalesReturn.tsx - FIXED Sales Return Management
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
@@ -11,6 +11,11 @@ import {
   Save,
   Truck,
   Scan,
+  FileText,
+  User,
+  Phone,
+  Calendar,
+  Package,
 } from "lucide-react";
 import {
   getInvoiceById,
@@ -22,7 +27,7 @@ import {
   CustomerReturnItem,
   WarehouseReturnItem,
 } from "../../firebase/salesReturns";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, collection, getDocs, query, orderBy, limit } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
 
@@ -59,6 +64,11 @@ export default function SalesReturn() {
   const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
   const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
   
+  // Recent Invoices States
+  const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
+  const [showRecentInvoices, setShowRecentInvoices] = useState(true);
+  const [loadingRecent, setLoadingRecent] = useState(false);
+  
   // Warehouse Return States
   const [scannedItems, setScannedItems] = useState<any[]>([]);
   const [warehouseReasons, setWarehouseReasons] = useState<Record<string, string>>({});
@@ -67,6 +77,59 @@ export default function SalesReturn() {
   const [searching, setSearching] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [scannerDisabled, setScannerDisabled] = useState(false); // Disable scanner when typing
+
+  // Load recent invoices for the selected branch
+  const loadRecentInvoices = async () => {
+    setLoadingRecent(true);
+    try {
+      const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
+      const q = query(
+        invoicesRef,
+        orderBy("createdAt", "desc"),
+        limit(20)
+      );
+      const snap = await getDocs(q);
+      
+      const invoices = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      setRecentInvoices(invoices);
+    } catch (error) {
+      console.error("Error loading recent invoices:", error);
+      toast.error("Failed to load recent invoices");
+    } finally {
+      setLoadingRecent(false);
+    }
+  };
+
+  // Load recent invoices when branch changes (only for customer returns)
+  useEffect(() => {
+    if (returnType === "customer-to-shop") {
+      loadRecentInvoices();
+    }
+  }, [selectedBranch, returnType]);
+
+  // Select invoice from recent list
+  const selectInvoice = (selectedInvoice: any) => {
+    setInvoiceId(selectedInvoice.invoiceId || selectedInvoice.id);
+    setInvoice(selectedInvoice);
+    setShowRecentInvoices(false);
+    setSelectedItems(new Set());
+    setReturnReasons({});
+    setReturnRemarks({});
+  };
+
+  // Go back to recent invoices
+  const goBackToRecentInvoices = () => {
+    setShowRecentInvoices(true);
+    setInvoice(null);
+    setInvoiceId("");
+    setSelectedItems(new Set());
+    setReturnReasons({});
+    setReturnRemarks({});
+  };
 
   // Search Invoice (Customer Return)
   const handleSearchInvoice = async () => {
@@ -86,6 +149,7 @@ export default function SalesReturn() {
       }
 
       setInvoice(foundInvoice);
+      setShowRecentInvoices(false);
       setSelectedItems(new Set());
       setReturnReasons({});
       setReturnRemarks({});
@@ -194,6 +258,8 @@ export default function SalesReturn() {
       setSelectedItems(new Set());
       setReturnReasons({});
       setReturnRemarks({});
+      setShowRecentInvoices(true);
+      loadRecentInvoices(); // Refresh the list
     } catch (error) {
       console.error("Error processing customer return:", error);
       toast.dismiss(loadingToast);
@@ -384,36 +450,133 @@ export default function SalesReturn() {
             {/* CUSTOMER RETURN SECTION */}
             {returnType === "customer-to-shop" && (
               <>
-                {/* Invoice Search */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
-                      Invoice ID *
-                    </label>
-                    <input
-                      type="text"
-                      value={invoiceId}
-                      onChange={(e) => setInvoiceId(e.target.value)}
-                      placeholder="Enter invoice ID..."
-                      className={inputStyle}
-                      disabled={!!invoice}
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      onClick={handleSearchInvoice}
-                      disabled={searching || !!invoice}
-                      className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <Search size={18} />
-                      Search Invoice
-                    </button>
-                  </div>
-                </div>
+                {showRecentInvoices && !invoice ? (
+                  <>
+                    {/* Invoice Search */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
+                          <Search className="inline mr-1" size={14} />
+                          Search by Invoice ID
+                        </label>
+                        <input
+                          type="text"
+                          value={invoiceId}
+                          onChange={(e) => setInvoiceId(e.target.value)}
+                          placeholder="Enter invoice ID (e.g., INV-1234567890)"
+                          className={inputStyle}
+                          onKeyPress={(e) => e.key === "Enter" && handleSearchInvoice()}
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          onClick={handleSearchInvoice}
+                          disabled={searching}
+                          className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          {searching ? (
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <Search size={18} />
+                          )}
+                          Search Invoice
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Recent Invoices List */}
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                          📋 Recent Invoices ({selectedBranch})
+                        </h3>
+                        <button
+                          onClick={loadRecentInvoices}
+                          disabled={loadingRecent}
+                          className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                        >
+                          {loadingRecent ? "Loading..." : "Refresh"}
+                        </button>
+                      </div>
+
+                      {loadingRecent ? (
+                        <div className="text-center py-8">
+                          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                          <p className="text-gray-500 dark:text-gray-400">Loading recent invoices...</p>
+                        </div>
+                      ) : recentInvoices.length === 0 ? (
+                        <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl">
+                          <FileText className="mx-auto mb-2 text-gray-400" size={48} />
+                          <p className="text-gray-500 dark:text-gray-400">No invoices found for {selectedBranch}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 max-h-96 overflow-y-auto">
+                          {recentInvoices.map((inv) => (
+                            <div
+                              key={inv.id}
+                              className="p-4 border border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-white/5 hover:shadow-md transition-shadow cursor-pointer"
+                              onClick={() => selectInvoice(inv)}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <FileText className="text-blue-600 dark:text-blue-400" size={20} />
+                                  <span className="font-semibold text-gray-900 dark:text-white">
+                                    {inv.invoiceId || inv.id}
+                                  </span>
+                                </div>
+                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                  {new Date(inv.createdAt).toLocaleDateString()}
+                                </span>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="flex items-center gap-1">
+                                  <User className="text-gray-400" size={14} />
+                                  <span className="text-gray-600 dark:text-gray-400">
+                                    {inv.customerName || "Walk-in Customer"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Phone className="text-gray-400" size={14} />
+                                  <span className="text-gray-600 dark:text-gray-400">
+                                    {inv.customerPhone || "N/A"}
+                                  </span>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center justify-between mt-2">
+                                <div className="flex items-center gap-1">
+                                  <Package className="text-gray-400" size={14} />
+                                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                                    {inv.items?.length || 0} items
+                                  </span>
+                                </div>
+                                <div className="text-lg font-bold text-green-600 dark:text-green-400">
+                                  ₹{(inv.totals?.grandTotal || inv.totalAmount || 0).toLocaleString()}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
 
                 {/* Invoice Items */}
                 {invoice && (
                   <>
+                    {/* Back Button */}
+                    <div className="mb-4">
+                      <button
+                        onClick={goBackToRecentInvoices}
+                        className="flex items-center gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                      >
+                        <ArrowLeft size={16} />
+                        Back to Recent Invoices
+                      </button>
+                    </div>
+
                     <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
                       <div className="flex justify-between items-center">
                         <div>
@@ -424,11 +587,7 @@ export default function SalesReturn() {
                           </p>
                         </div>
                         <button
-                          onClick={() => {
-                            setInvoice(null);
-                            setInvoiceId("");
-                            setSelectedItems(new Set());
-                          }}
+                          onClick={goBackToRecentInvoices}
                           className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm"
                         >
                           Clear

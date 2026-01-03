@@ -20,6 +20,17 @@ interface BillItem {
   warehouseItemId?: string;
 }
 
+interface BookingItem {
+  id: string;
+  barcode?: string;
+  itemName: string;
+  stoneSapphire: string;
+  trNo: string;
+  pieces: number;
+  weight: string;
+  total: number;
+}
+
 interface ShopContextType {
   // Branch Stock Cache
   branchStockCache: Record<BranchName, BranchStockItem[]>;
@@ -35,6 +46,22 @@ interface ShopContextType {
   };
   updateBill: (updates: Partial<ShopContextType['currentBill']>) => void;
   clearBill: () => void;
+  
+  // Booking State
+  currentBooking: {
+    branch: BranchName;
+    items: BookingItem[];
+    partyName: string;
+    mobileNo: string;
+    deliveryDate: string;
+    salespersonName: string;
+    netAmount: number;
+    cashAdvance: number;
+    pendingAmount: number;
+    remarks: string;
+  };
+  updateBooking: (updates: Partial<ShopContextType['currentBooking']>) => void;
+  clearBooking: () => void;
   
   // Loading States
   loadingStates: Record<string, boolean>;
@@ -85,6 +112,41 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     };
   });
 
+  const [currentBooking, setCurrentBooking] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const data = JSON.parse(saved);
+        return data.currentBooking || {
+          branch: "Sangli" as BranchName,
+          items: [],
+          partyName: "",
+          mobileNo: "",
+          deliveryDate: "",
+          salespersonName: "",
+          netAmount: 0,
+          cashAdvance: 0,
+          pendingAmount: 0,
+          remarks: "",
+        };
+      }
+    } catch (error) {
+      console.error("Error loading booking from localStorage:", error);
+    }
+    return {
+      branch: "Sangli" as BranchName,
+      items: [],
+      partyName: "",
+      mobileNo: "",
+      deliveryDate: "",
+      salespersonName: "",
+      netAmount: 0,
+      cashAdvance: 0,
+      pendingAmount: 0,
+      remarks: "",
+    };
+  });
+
   const [loadingStates, setLoadingStatesState] = useState<Record<string, boolean>>({});
 
   // Save to localStorage whenever data changes
@@ -93,13 +155,14 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       const dataToSave = {
         branchStockCache,
         currentBill,
+        currentBooking,
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (error) {
       console.error("Error saving to localStorage:", error);
     }
-  }, [branchStockCache, currentBill]);
+  }, [branchStockCache, currentBill, currentBooking]);
 
   const setBranchStockCache = (branch: BranchName, stock: BranchStockItem[]) => {
     setBranchStockCacheState((prev) => ({
@@ -125,6 +188,28 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateBooking = (updates: Partial<ShopContextType['currentBooking']>) => {
+    setCurrentBooking((prev: ShopContextType['currentBooking']) => ({
+      ...prev,
+      ...updates,
+    }));
+  };
+
+  const clearBooking = () => {
+    setCurrentBooking({
+      branch: currentBooking.branch,
+      items: [],
+      partyName: "",
+      mobileNo: "",
+      deliveryDate: "",
+      salespersonName: "",
+      netAmount: 0,
+      cashAdvance: 0,
+      pendingAmount: 0,
+      remarks: "",
+    });
+  };
+
   const setLoadingState = (key: string, loading: boolean) => {
     setLoadingStatesState((prev) => ({
       ...prev,
@@ -140,6 +225,9 @@ export function ShopProvider({ children }: { children: ReactNode }) {
         currentBill,
         updateBill,
         clearBill,
+        currentBooking,
+        updateBooking,
+        clearBooking,
         loadingStates,
         setLoadingState,
       }}

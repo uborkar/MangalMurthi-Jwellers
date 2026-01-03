@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
-import { Trash2, Download, Printer, ShoppingCart } from "lucide-react";
+import { Trash2, Download, Printer, ShoppingCart, Eye } from "lucide-react";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import { getItemByBarcode, markItemSold } from "../../firebase/warehouseItems";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
+import InvoicePreview from "../../components/common/InvoicePreview";
 import { doc, updateDoc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import * as XLSX from "xlsx";
@@ -50,6 +51,8 @@ export default function Billing() {
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [savedInvoiceData, setSavedInvoiceData] = useState<any>(null);
   
   // GST Settings
   const [gstSettings, setGstSettings] = useState<GSTSettings | null>(null);
@@ -65,10 +68,35 @@ export default function Billing() {
   const loadGSTSettings = async () => {
     try {
       const settings = await getGSTSettings();
-      setGstSettings(settings);
-      setGstType(settings.defaultType);
+      if (settings && settings.defaultType) {
+        setGstSettings(settings);
+        setGstType(settings.defaultType);
+      } else {
+        // Set default values if settings don't exist
+        const defaultSettings: GSTSettings = {
+          defaultType: "cgst_sgst",
+          cgst: 1.5,
+          sgst: 1.5,
+          igst: 3,
+          updatedAt: new Date().toISOString(),
+          updatedBy: "system",
+        };
+        setGstSettings(defaultSettings);
+        setGstType(defaultSettings.defaultType);
+      }
     } catch (error) {
       console.error("Error loading GST settings:", error);
+      // Set default values on error
+      const defaultSettings: GSTSettings = {
+        defaultType: "cgst_sgst",
+        cgst: 1.5,
+        sgst: 1.5,
+        igst: 3,
+        updatedAt: new Date().toISOString(),
+        updatedBy: "system",
+      };
+      setGstSettings(defaultSettings);
+      setGstType(defaultSettings.defaultType);
     }
   };
 
@@ -366,48 +394,66 @@ export default function Billing() {
         // Don't fail the sale if ledger fails
       }
 
-      // Show print confirmation dialog
-      const shouldPrint = window.confirm(
-        "Invoice saved successfully!\n\nDo you want to print the invoice now?"
-      );
+      // Save invoice data for preview
+      setSavedInvoiceData({
+        ...invoiceData,
+        totals,
+        gstType,
+        companySettings,
+      });
 
-      if (shouldPrint) {
-        // Print the invoice
-        window.print();
-      }
+      // Show preview modal
+      setShowPreview(true);
 
-      // Ask if user wants to clear the bill
-      const shouldClear = window.confirm(
-        "Do you want to clear the bill and start a new one?"
-      );
-
-      if (shouldClear) {
-        // Clear cache to force fresh load (to show sold items)
-        setBranchStockCache(selectedBranch, []);
-        
-        // Clear bill from context
-        clearBill();
-        
-        // Reset local state
-        setBillItems([]);
-        setCustomerName("");
-        setCustomerPhone("");
-        setSalespersonName("");
-        
-        console.log("✅ State cleared, reloading stock...");
-        // Reload stock (will fetch fresh data including sold items)
-        await loadBranchStock();
-        console.log("✅ Stock reloaded!");
-      } else {
-        // Keep the invoice on screen for reference
-        toast("Invoice kept on screen. You can print again or manually clear.", {
-          duration: 5000,
-        });
-      }
     } catch (error) {
       console.error("❌ Error saving invoice:", error);
       toast.dismiss(loadingToast);
       toast.error(`Failed to save invoice: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  };
+
+  // Handle print from preview
+  const handlePrintInvoice = () => {
+    setShowPreview(false);
+    setTimeout(() => {
+      window.print();
+      
+      // Ask if user wants to clear after print
+      setTimeout(() => {
+        const shouldClear = window.confirm(
+          "Do you want to clear the bill and start a new one?"
+        );
+
+        if (shouldClear) {
+          // Clear cache to force fresh load
+          setBranchStockCache(selectedBranch, []);
+          clearBill();
+          setBillItems([]);
+          setCustomerName("");
+          setCustomerPhone("");
+          setSalespersonName("");
+          loadBranchStock();
+        }
+      }, 500);
+    }, 100);
+  };
+
+  // Close preview without printing
+  const handleClosePreview = () => {
+    setShowPreview(false);
+    
+    const shouldClear = window.confirm(
+      "Do you want to clear the bill and start a new one?"
+    );
+
+    if (shouldClear) {
+      setBranchStockCache(selectedBranch, []);
+      clearBill();
+      setBillItems([]);
+      setCustomerName("");
+      setCustomerPhone("");
+      setSalespersonName("");
+      loadBranchStock();
     }
   };
 

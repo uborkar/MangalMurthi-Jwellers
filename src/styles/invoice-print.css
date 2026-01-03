@@ -1,0 +1,257 @@
+/* =====================================================
+   INVOICE & BOOKING PRINT STYLES
+   For Billing, Sales Booking, and other documents
+   ===================================================== */
+
+@media print {
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  /* Reset and base styles */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    font-size: 10pt !important;
+    line-height: 1.2 !important;
+  }
+
+  /* Hide non-printable elements */
+  .no-print,
+  button,
+  .print-hide,
+  nav,
+  aside,
+  header:not(.print-header),
+  footer:not(.print-footer),
+  .sidebar,
+  [role="navigation"],
+  [role="banner"],
+  [role="complementary"],
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="tel"],
+  textarea,
+  select {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Show only print content */
+  .print-only,
+  .print-header,
+  .print-area,
+  .print-content,
+  .print-totals,
+  .print-signatures {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* Ensure all children are visible */
+  .print-only *,
+  .print-header *,
+  .print-area *,
+  .print-content *,
+  .print-totals *,
+  .print-signatures * {
+    visibility: visible !important;
+  }
+
+  /* Print header */
+  .print-header {
+    text-align: center;
+    margin-bottom: 5mm !important;
+    padding-bottom: 3mm !important;
+    border-bottom: 2px solid #000 !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-header h1 {
+    font-size: 16pt !important;
+    font-weight: bold !important;
+    margin: 0 0 3mm 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-header p {
+    font-size: 9pt !important;
+    margin: 1mm 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Tables */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+    font-size: 9pt !important;
+    margin: 3mm 0 !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tbody {
+    display: table-row-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+
+  th {
+    background-color: #f0f0f0 !important;
+    border: 1px solid #000 !important;
+    padding: 2mm !important;
+    font-weight: bold !important;
+    text-align: left !important;
+    font-size: 9pt !important;
+  }
+
+  td {
+    border: 1px solid #000 !important;
+    padding: 2mm !important;
+    font-size: 9pt !important;
+  }
+
+  /* Totals and summary sections */
+  .print-totals {
+    margin-top: 3mm !important;
+    padding: 3mm !important;
+    border: 2px solid #000 !important;
+    page-break-inside: avoid !important;
+    font-size: 9pt !important;
+  }
+
+  .print-totals table {
+    border: none !important;
+    margin: 0 !important;
+  }
+
+  .print-totals td,
+  .print-totals th {
+    border: none !important;
+    padding: 1mm !important;
+  }
+
+  /* Signatures */
+  .print-signatures {
+    display: flex !important;
+    justify-content: space-between !important;
+    margin-top: 10mm !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-signature {
+    text-align: center !important;
+    width: 40% !important;
+  }
+
+  .print-signature-line {
+    border-top: 1px solid #000 !important;
+    margin-top: 8mm !important;
+    padding-top: 2mm !important;
+    font-size: 9pt !important;
+  }
+
+  /* Grid layouts for print */
+  .grid {
+    display: block !important;
+  }
+
+  .grid-cols-2 > div {
+    display: inline-block !important;
+    width: 48% !important;
+    vertical-align: top !important;
+  }
+
+  /* Remove all spacing that causes page breaks */
+  .mb-6, .mb-4, .mt-6, .mt-4, .my-6, .my-4,
+  .p-6, .p-4, .py-6, .py-4, .px-6, .px-4 {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Compact spacing for print */
+  .print-area {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Page breaks */
+  .page-break {
+    page-break-after: always !important;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid !important;
+  }
+
+  /* Remove shadows and rounded corners */
+  * {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    text-shadow: none !important;
+  }
+
+  /* Links */
+  a {
+    text-decoration: none !important;
+    color: #000 !important;
+  }
+
+  a[href]:after {
+    content: none !important;
+  }
+
+  /* Images */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Force single page for booking */
+  .print-content {
+    max-height: 260mm !important;
+    overflow: hidden !important;
+  }
+
+  /* Compact table for booking */
+  .print-area table {
+    font-size: 8pt !important;
+  }
+
+  .print-area th,
+  .print-area td {
+    padding: 1.5mm !important;
+    font-size: 8pt !important;
+  }
+}
+
+/* Screen preview styles */
+@media screen {
+  .print-only {
+    display: none;
+  }
+
+  .print-preview {
+    max-width: 210mm;
+    margin: 20px auto;
+    padding: 20px;
+    background: white;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  }
+}

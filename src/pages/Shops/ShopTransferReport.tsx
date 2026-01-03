@@ -513,11 +513,11 @@ export default function ShopTransferReport() {
       {/* Transfer Details Modal */}
       {selectedTransfer && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[99999] p-4"
           onClick={() => setSelectedTransfer(null)}
         >
           <div
-            className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto"
+            className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6 border-b border-gray-200 dark:border-gray-800">

@@ -94,6 +94,10 @@ const navItems: NavItem[] = [
         path: "/shops/sales-return",
       },
       {
+        name: "Return Report",
+        path: "/shops/return-report",
+      },
+      {
         name: "Shop Expenses",
         path: "/shops/shop-expense",
       },

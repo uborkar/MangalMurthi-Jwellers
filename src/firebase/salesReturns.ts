@@ -164,6 +164,7 @@ export async function updateWarehouseReturnStatus(
 
 /**
  * Search for an invoice by invoice ID
+ * Searches by document ID first, then by invoiceId field if not found
  * Path: shops/{branch}/invoices/{invoiceId}
  */
 export async function getInvoiceById(
@@ -171,6 +172,7 @@ export async function getInvoiceById(
   invoiceId: string
 ): Promise<(InvoiceData & { id: string }) | null> {
   try {
+    // Try 1: Search by document ID (exact match)
     const docRef = doc(db, "shops", branch, "invoices", invoiceId);
     const docSnap = await getDoc(docRef);
     
@@ -180,6 +182,23 @@ export async function getInvoiceById(
         ...(docSnap.data() as InvoiceData),
       };
     }
+
+    // Try 2: Search by invoiceId field (in case document ID is different)
+    console.log("Invoice not found by document ID, searching by invoiceId field...");
+    const colRef = collection(db, "shops", branch, "invoices");
+    const snap = await getDocs(colRef);
+    
+    for (const doc of snap.docs) {
+      const data = doc.data() as InvoiceData;
+      if (data.invoiceId === invoiceId) {
+        return {
+          id: doc.id,
+          ...data,
+        };
+      }
+    }
+
+    console.log(`Invoice ${invoiceId} not found in ${branch}`);
     return null;
   } catch (error) {
     console.error("Error fetching invoice:", error);
