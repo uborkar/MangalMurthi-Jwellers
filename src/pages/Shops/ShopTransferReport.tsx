@@ -178,9 +178,9 @@ export default function ShopTransferReport() {
         { header: "Label", key: "label", width: 20 },
         { header: "Category", key: "category", width: 20 },
         { header: "Weight", key: "weight", width: 12 },
-        { header: "Purity", key: "purity", width: 12 },
+        { header: "Type", key: "type", width: 12 },
         { header: "Quantity", key: "quantity", width: 10 },
-        { header: "Price", key: "price", width: 15 },
+        { header: "Location", key: "location", width: 15 },
       ];
 
       transfers.forEach((transfer) => {
@@ -193,9 +193,9 @@ export default function ShopTransferReport() {
             label: row.label,
             category: row.category || "-",
             weight: row.weight || "-",
-            purity: row.purity || "-",
+            type: row.type || "-",
             quantity: row.quantity,
-            price: row.price || "-",
+            location: row.location || "-",
           });
         });
       });
@@ -567,7 +567,7 @@ export default function ShopTransferReport() {
                       <th className="p-2">Label</th>
                       <th className="p-2">Category</th>
                       <th className="p-2">Weight</th>
-                      <th className="p-2">Purity</th>
+                      <th className="p-2">Type</th>
                       <th className="p-2 text-right">Qty</th>
                     </tr>
                   </thead>
@@ -581,7 +581,7 @@ export default function ShopTransferReport() {
                         <td className="p-2 font-mono text-xs">{row.label}</td>
                         <td className="p-2">{row.category || "-"}</td>
                         <td className="p-2">{row.weight || "-"}</td>
-                        <td className="p-2">{row.purity || "-"}</td>
+                        <td className="p-2">{row.type || "-"}</td>
                         <td className="p-2 text-right font-semibold">{row.quantity}</td>
                       </tr>
                     ))}

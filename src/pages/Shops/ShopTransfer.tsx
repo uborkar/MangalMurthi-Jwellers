@@ -45,7 +45,6 @@ const inputStyle =
 const ShopTransfer: React.FC = () => {
   const [branchStock, setBranchStock] = useState<Record<ShopName, BranchStockItem[]>>({});
   const [loading, setLoading] = useState(false);
-  const [scannerActive, setScannerActive] = useState(false);
 
   const [fromShop, setFromShop] = useState<ShopName>("");
   const [toShop, setToShop] = useState<ShopName>("");
@@ -518,8 +517,6 @@ const ShopTransfer: React.FC = () => {
               <div className="mb-6">
                 <BarcodeScanner
                   onScan={handleBarcodeScan}
-                  active={scannerActive}
-                  onActiveChange={setScannerActive}
                 />
               </div>
             )}
