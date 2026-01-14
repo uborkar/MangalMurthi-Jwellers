@@ -147,15 +147,19 @@
     margin: 8mm;
   }
 
-  /* Hide everything except print */
-  body * {
-    visibility: hidden !important;
+  /* ONLY hide non-print elements - NOT everything */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Barcode print area - ONLY for barcode printing page */
+  #print-area {
+    display: block !important;
+    position: static !important;
   }
 
   #print-area,
-  #print-area *,
-  .print-header,
-  .print-header * {
+  #print-area * {
     visibility: visible !important;
   }
 

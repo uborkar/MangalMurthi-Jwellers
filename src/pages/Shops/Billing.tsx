@@ -3,12 +3,12 @@ import { useEffect, useState } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
-import { Trash2, Download, Printer, ShoppingCart, Eye } from "lucide-react";
+import { Trash2, Download, Printer, ShoppingCart, Eye, Scan, RotateCcw, ArrowLeft, Search } from "lucide-react";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import { getItemByBarcode, markItemSold } from "../../firebase/warehouseItems";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
 import InvoicePreview from "../../components/common/InvoicePreview";
-import { doc, updateDoc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { doc, updateDoc, setDoc, collection, query, orderBy, limit, getDocs, where, getDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
@@ -16,8 +16,19 @@ import autoTable from "jspdf-autotable";
 import { useShop } from "../../context/ShopContext";
 import { createSaleLedgerEntry } from "../../firebase/ledger";
 import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
+import { 
+  createSalesReturnBill, 
+  updateInvoiceWithReturn, 
+  updateStockAfterReturn,
+  calculateReturnAmounts,
+  generateReturnId,
+  canReturnItem,
+  SalesReturnBill,
+  ReturnedItem,
+} from "../../firebase/salesReturnBill";
 
 import { numberToWords } from "../../utils/numberToWords";
+import { createPrintHTML, printDocument } from "../../utils/printUtils";
 
 type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
@@ -39,9 +50,20 @@ interface BillItem {
 
 const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
+const RETURN_REASONS = [
+  "Defective",
+  "Wrong Item",
+  "Customer Changed Mind",
+  "Size Issue",
+  "Quality Issue",
+  "Design Not Liked",
+  "Exchange for Different Design",
+  "Other",
+];
+
 export default function Billing() {
   const { branchStockCache, setBranchStockCache, currentBill, updateBill, clearBill } = useShop();
-  
+
   const [selectedBranch, setSelectedBranch] = useState<BranchName>(currentBill.branch);
   const [customerName, setCustomerName] = useState(currentBill.customerName);
   const [customerPhone, setCustomerPhone] = useState(currentBill.customerPhone);
@@ -53,7 +75,28 @@ export default function Billing() {
   const [lastInvoice, setLastInvoice] = useState<any>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [savedInvoiceData, setSavedInvoiceData] = useState<any>(null);
+
+  // Barcode scanner mode state
+  const [scannerEnabled, setScannerEnabled] = useState(false);
+  const [scannedQueue, setScannedQueue] = useState<BillItem[]>([]);
+
+  // Bill Mode: 'new-bill' or 'return-bill'
+  const [billMode, setBillMode] = useState<'new-bill' | 'return-bill'>('new-bill');
   
+  // Return Bill States
+  const [searchInvoiceId, setSearchInvoiceId] = useState("");
+  const [searchPhone, setSearchPhone] = useState("");
+  const [originalInvoice, setOriginalInvoice] = useState<any>(null);
+  const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
+  const [selectedReturnItems, setSelectedReturnItems] = useState<Set<string>>(new Set());
+  const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
+  const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
+  const [returnCalculation, setReturnCalculation] = useState<any>(null);
+  const [settlementMode, setSettlementMode] = useState<'exchange' | 'refund' | 'store-credit'>('exchange');
+  const [availableCredit, setAvailableCredit] = useState(0);
+  const [processingReturn, setProcessingReturn] = useState(false);
+  const [searchingInvoice, setSearchingInvoice] = useState(false);
+
   // GST Settings
   const [gstSettings, setGstSettings] = useState<GSTSettings | null>(null);
   const [gstType, setGstType] = useState<"cgst_sgst" | "igst">("cgst_sgst");
@@ -63,7 +106,60 @@ export default function Billing() {
   useEffect(() => {
     loadGSTSettings();
     loadCompanySettings();
+    restoreExchangeSession();
   }, []);
+
+  // Restore exchange credit and customer info from sessionStorage
+  const restoreExchangeSession = () => {
+    try {
+      const savedExchangeData = sessionStorage.getItem('exchangeCredit');
+      if (savedExchangeData) {
+        const data = JSON.parse(savedExchangeData);
+        // Check if credit is still valid (within 24 hours)
+        const savedTime = new Date(data.timestamp).getTime();
+        const now = new Date().getTime();
+        const hoursDiff = (now - savedTime) / (1000 * 60 * 60);
+        
+        if (hoursDiff < 24 && data.branch === selectedBranch) {
+          setAvailableCredit(data.credit);
+          setCustomerName(data.customerName || '');
+          setCustomerPhone(data.customerPhone || '');
+          toast.success(`Exchange credit restored: ₹${data.credit.toFixed(2)}`);
+        } else {
+          // Clear expired or different branch credit
+          sessionStorage.removeItem('exchangeCredit');
+        }
+      }
+    } catch (error) {
+      console.error('Error restoring exchange session:', error);
+      sessionStorage.removeItem('exchangeCredit');
+    }
+  };
+
+  // Save exchange credit to sessionStorage
+  const saveExchangeSession = (credit: number, customerName: string, customerPhone: string) => {
+    try {
+      const exchangeData = {
+        credit,
+        customerName,
+        customerPhone,
+        branch: selectedBranch,
+        timestamp: new Date().toISOString(),
+      };
+      sessionStorage.setItem('exchangeCredit', JSON.stringify(exchangeData));
+    } catch (error) {
+      console.error('Error saving exchange session:', error);
+    }
+  };
+
+  // Clear exchange credit from sessionStorage
+  const clearExchangeSession = () => {
+    try {
+      sessionStorage.removeItem('exchangeCredit');
+    } catch (error) {
+      console.error('Error clearing exchange session:', error);
+    }
+  };
 
   const loadGSTSettings = async () => {
     try {
@@ -146,15 +242,17 @@ export default function Billing() {
     setLoading(true);
     try {
       const stock = await getShopStock(selectedBranch);
-      
+
       // Cache ALL items (including sold)
       setBranchStockCache(selectedBranch, stock);
-      
+
       // But only show available items in billing
       const available = stock.filter((s) => s.status === "in-branch" || !s.status);
       setBranchStock(available);
-      
-      toast.success(`Loaded ${available.length} available items from ${selectedBranch}`);
+
+      toast.success(`Loaded ${available.length} available items from ${selectedBranch}`, {
+        id: `load-stock-${selectedBranch}`,
+      });
     } catch (error) {
       console.error("Error loading stock:", error);
       toast.error("Failed to load branch stock");
@@ -222,12 +320,300 @@ export default function Billing() {
       // Calculate taxable amount
       const calculated = calculateItemTaxable(newItem);
       setBillItems((prev) => [...prev, calculated]);
+      
+      // Add to scanned queue for visual feedback
+      setScannedQueue((prev) => [calculated, ...prev].slice(0, 10)); // Keep last 10
+      
       toast.success(`✅ Added: ${stockItem.category} (${trimmedBarcode})`);
     } catch (error) {
       console.error("Error scanning barcode:", error);
       toast.error("Failed to process barcode");
     }
   };
+  
+  // Clear scanned queue
+  const clearScannedQueue = () => {
+    setScannedQueue([]);
+  };
+
+  // ============================================
+  // RETURN BILL FUNCTIONS
+  // ============================================
+
+  // Load recent invoices for return
+  const loadRecentInvoices = async () => {
+    try {
+      const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
+      const q = query(invoicesRef, orderBy("createdAt", "desc"), limit(20));
+      const snapshot = await getDocs(q);
+      
+      const invoices = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      
+      setRecentInvoices(invoices);
+    } catch (error) {
+      console.error("Error loading recent invoices:", error);
+      toast.error("Failed to load recent invoices");
+    }
+  };
+
+  // Search invoice by ID or phone
+  const searchInvoice = async () => {
+    if (!searchInvoiceId.trim() && !searchPhone.trim()) {
+      toast.error("Enter invoice ID or phone number");
+      return;
+    }
+
+    setSearchingInvoice(true);
+    try {
+      const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
+      let q;
+      
+      if (searchInvoiceId.trim()) {
+        // Search by invoice ID
+        const invoiceDocRef = doc(db, "shops", selectedBranch, "invoices", searchInvoiceId.trim());
+        const snapshot = await getDoc(invoiceDocRef);
+        
+        if (snapshot.exists()) {
+          setOriginalInvoice({ id: snapshot.id, ...snapshot.data() });
+          setSelectedReturnItems(new Set());
+          setReturnReasons({});
+          setReturnRemarks({});
+          toast.success("Invoice loaded");
+        } else {
+          toast.error("Invoice not found");
+        }
+      } else if (searchPhone.trim()) {
+        // Search by phone
+        q = query(
+          invoicesRef,
+          where("customerPhone", "==", searchPhone.trim()),
+          orderBy("createdAt", "desc"),
+          limit(10)
+        );
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+          const invoices = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          setRecentInvoices(invoices);
+          toast.success(`Found ${invoices.length} invoice(s)`);
+        } else {
+          toast.error("No invoices found for this phone number");
+        }
+      }
+    } catch (error) {
+      console.error("Error searching invoice:", error);
+      toast.error("Failed to search invoice");
+    } finally {
+      setSearchingInvoice(false);
+    }
+  };
+
+  // Select invoice from recent list
+  const selectInvoiceForReturn = (invoice: any) => {
+    setOriginalInvoice(invoice);
+    setSelectedReturnItems(new Set());
+    setReturnReasons({});
+    setReturnRemarks({});
+    setRecentInvoices([]);
+  };
+
+  // Toggle return item selection
+  const toggleReturnItem = (barcode: string) => {
+    setSelectedReturnItems((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(barcode)) {
+        newSet.delete(barcode);
+        // Remove reason and remarks
+        const { [barcode]: _, ...restReasons } = returnReasons;
+        const { [barcode]: __, ...restRemarks } = returnRemarks;
+        setReturnReasons(restReasons);
+        setReturnRemarks(restRemarks);
+      } else {
+        newSet.add(barcode);
+      }
+      return newSet;
+    });
+  };
+
+  // Calculate return amounts
+  const calculateReturn = () => {
+    if (!originalInvoice || selectedReturnItems.size === 0) {
+      return null;
+    }
+
+    const selectedItems = originalInvoice.items.filter((item: any) =>
+      selectedReturnItems.has(item.barcode)
+    );
+
+    const calc = calculateReturnAmounts(
+      selectedItems.map((item: any) => ({ originalPrice: item.sellingPrice })),
+      gstType,
+      gstSettings?.cgst || 1.5,
+      gstSettings?.sgst || 1.5,
+      gstSettings?.igst || 3
+    );
+
+    setReturnCalculation(calc);
+    return calc;
+  };
+
+  // Process return bill
+  const processReturnBill = async () => {
+    if (!originalInvoice) {
+      toast.error("No invoice selected");
+      return;
+    }
+
+    if (selectedReturnItems.size === 0) {
+      toast.error("Select at least one item to return");
+      return;
+    }
+
+    // Validate reasons
+    for (const barcode of selectedReturnItems) {
+      if (!returnReasons[barcode]) {
+        toast.error("Please provide return reason for all items");
+        return;
+      }
+    }
+
+    setProcessingReturn(true);
+    const loadingToast = toast.loading("Processing return...");
+
+    try {
+      const returnId = generateReturnId(selectedBranch);
+      const calc = calculateReturn();
+
+      if (!calc) {
+        throw new Error("Failed to calculate return");
+      }
+
+      // Prepare returned items
+      const returnedItems: ReturnedItem[] = originalInvoice.items
+        .filter((item: any) => selectedReturnItems.has(item.barcode))
+        .map((item: any) => ({
+          barcode: item.barcode,
+          category: item.category,
+          subcategory: item.subcategory,
+          location: item.location,
+          type: item.type,
+          weight: item.weight,
+          originalPrice: item.sellingPrice,
+          originalDiscount: item.discount,
+          returnRate: 50,
+          returnAmount: item.sellingPrice * 0.5,
+          returnReason: returnReasons[item.barcode],
+          remarks: returnRemarks[item.barcode] || "",
+          stockStatus: "returned-to-inventory",
+        }));
+
+      // Create return bill record
+      const returnBill: Omit<SalesReturnBill, "id" | "createdAt"> = {
+        returnId,
+        originalInvoiceId: originalInvoice.id || originalInvoice.invoiceId,
+        branch: selectedBranch,
+        customerName: originalInvoice.customerName || "",
+        customerPhone: originalInvoice.customerPhone || "",
+        returnDate: new Date().toISOString(),
+        processedBy: salespersonName || "Unknown",
+        returnedItems,
+        calculations: {
+          totalOriginalValue: calc.totalOriginalValue,
+          totalReturnValue: calc.totalReturnValue,
+          returnRate: 50,
+          cgst: calc.cgst,
+          sgst: calc.sgst,
+          igst: calc.igst,
+          totalCreditAmount: calc.totalCreditAmount,
+        },
+        settlementType: settlementMode,
+        status: settlementMode === "exchange" ? "pending" : "completed",
+      };
+
+      // Save return bill
+      await createSalesReturnBill(selectedBranch, returnBill);
+
+      // Update original invoice
+      await updateInvoiceWithReturn(
+        selectedBranch,
+        originalInvoice.id || originalInvoice.invoiceId,
+        returnId,
+        Array.from(selectedReturnItems)
+      );
+
+      // Update stock for returned items
+      for (const barcode of selectedReturnItems) {
+        await updateStockAfterReturn(selectedBranch, barcode, "in-branch");
+      }
+
+      toast.dismiss(loadingToast);
+
+      if (settlementMode === "exchange") {
+        // Set credit and switch to new bill mode
+        const creditAmount = calc.totalCreditAmount;
+        const custName = originalInvoice.customerName || "";
+        const custPhone = originalInvoice.customerPhone || "";
+        
+        setAvailableCredit(creditAmount);
+        setCustomerName(custName);
+        setCustomerPhone(custPhone);
+        
+        // Save to sessionStorage for persistence across navigation
+        saveExchangeSession(creditAmount, custName, custPhone);
+        
+        setBillMode("new-bill");
+        setOriginalInvoice(null);
+        setSelectedReturnItems(new Set());
+        await loadBranchStock(); // Reload stock
+        toast.success(`Return processed! Credit: ₹${creditAmount.toFixed(2)}. Add items for exchange.`);
+      } else {
+        toast.success(`Return processed successfully! Refund: ₹${calc.totalCreditAmount.toFixed(2)}`);
+        // Reset return bill
+        setOriginalInvoice(null);
+        setSelectedReturnItems(new Set());
+        setBillMode("new-bill");
+      }
+    } catch (error) {
+      console.error("Error processing return:", error);
+      toast.dismiss(loadingToast);
+      toast.error("Failed to process return");
+    } finally {
+      setProcessingReturn(false);
+    }
+  };
+
+  // Cancel return and go back
+  const cancelReturn = () => {
+    setOriginalInvoice(null);
+    setSelectedReturnItems(new Set());
+    setReturnReasons({});
+    setReturnRemarks({});
+    setReturnCalculation(null);
+    setSearchInvoiceId("");
+    setSearchPhone("");
+    setRecentInvoices([]);
+    setBillMode("new-bill");
+  };
+
+  // Load recent invoices when entering return mode
+  useEffect(() => {
+    if (billMode === "return-bill") {
+      loadRecentInvoices();
+    }
+  }, [billMode, selectedBranch]);
+
+  // Recalculate return when items change
+  useEffect(() => {
+    if (originalInvoice && selectedReturnItems.size > 0) {
+      calculateReturn();
+    }
+  }, [selectedReturnItems, originalInvoice]);
 
   // Calculate taxable amount for an item (with discount)
   const calculateItemTaxable = (item: BillItem): BillItem => {
@@ -264,6 +650,8 @@ export default function Billing() {
     sgst: 0,
     igst: 0,
     grandTotal: 0,
+    creditAdjustment: availableCredit, // Credit from return
+    finalAmount: 0, // After credit adjustment
   };
 
   // Calculate GST based on type and settings
@@ -276,11 +664,12 @@ export default function Billing() {
   }
 
   totals.grandTotal = totals.taxable + totals.gst;
+  totals.finalAmount = totals.grandTotal - totals.creditAdjustment;
 
   // Save invoice
   const handleSaveInvoice = async () => {
     console.log("🔵 Save Invoice clicked");
-    
+
     if (billItems.length === 0) {
       toast.error("Add at least one item to the bill");
       return;
@@ -332,7 +721,7 @@ export default function Billing() {
       // Save invoice to Firestore
       console.log("🔵 Saving invoice to Firestore...");
       const invoiceRef = doc(db, "shops", selectedBranch, "invoices", invoiceId);
-      
+
       // Prepare invoice data (ensure no undefined values)
       const invoiceData = {
         invoiceId,
@@ -361,7 +750,11 @@ export default function Billing() {
           igst: totals.igst || 0,
           gst: totals.gst || 0,
           grandTotal: totals.grandTotal || 0,
+          creditAdjustment: availableCredit || 0,
+          finalAmount: totals.finalAmount || totals.grandTotal || 0,
         },
+        isExchangeBill: availableCredit > 0,
+        exchangeCredit: availableCredit > 0 ? availableCredit : undefined,
         gstType: gstType || "cgst_sgst",
         gstSettings: {
           cgst: gstSettings?.cgst || 1.5,
@@ -370,7 +763,7 @@ export default function Billing() {
         },
         createdAt: new Date().toISOString(),
       };
-      
+
       await setDoc(invoiceRef, invoiceData);
 
       console.log("✅ Invoice saved successfully!");
@@ -404,6 +797,11 @@ export default function Billing() {
 
       // Show preview modal
       setShowPreview(true);
+      
+      // Clear exchange session after successful invoice save
+      if (availableCredit > 0) {
+        clearExchangeSession();
+      }
 
     } catch (error) {
       console.error("❌ Error saving invoice:", error);
@@ -415,33 +813,274 @@ export default function Billing() {
   // Handle print from preview
   const handlePrintInvoice = () => {
     setShowPreview(false);
-    setTimeout(() => {
-      window.print();
-      
-      // Ask if user wants to clear after print
-      setTimeout(() => {
-        const shouldClear = window.confirm(
-          "Do you want to clear the bill and start a new one?"
-        );
-
-        if (shouldClear) {
-          // Clear cache to force fresh load
-          setBranchStockCache(selectedBranch, []);
-          clearBill();
-          setBillItems([]);
-          setCustomerName("");
-          setCustomerPhone("");
-          setSalespersonName("");
-          loadBranchStock();
+    
+    // Generate invoice ID
+    const invoiceId = `INV-${Date.now().toString().slice(-8)}`;
+    
+    // Create printable HTML
+    const printHTML = createPrintHTML({
+      title: `Invoice ${invoiceId}`,
+      styles: `
+        .invoice-header {
+          text-align: center;
+          border-bottom: 2px solid #000;
+          padding-bottom: 10px;
+          margin-bottom: 15px;
         }
-      }, 500);
-    }, 100);
+        
+        .invoice-header h1 {
+          font-size: 20px;
+          font-weight: bold;
+          margin: 0 0 8px 0;
+          text-transform: uppercase;
+        }
+        
+        .invoice-header p {
+          margin: 3px 0;
+          font-size: 11px;
+        }
+        
+        .bill-details {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 12px;
+          font-size: 11px;
+        }
+        
+        .party-details {
+          margin-bottom: 12px;
+          font-size: 11px;
+          border: 1px solid #000;
+          padding: 8px;
+        }
+        
+        .party-details p {
+          margin: 3px 0;
+        }
+        
+        .items-table {
+          font-size: 10px;
+          margin-bottom: 15px;
+        }
+        
+        .items-table th {
+          background-color: #f0f0f0;
+          padding: 5px;
+          text-align: left;
+        }
+        
+        .items-table td {
+          padding: 5px;
+        }
+        
+        .totals-section {
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          margin-top: 15px;
+        }
+        
+        .words-section {
+          width: 55%;
+        }
+        
+        .amounts-section {
+          width: 42%;
+          border: 1px solid #000;
+        }
+        
+        .amounts-section table {
+          width: 100%;
+          font-size: 10px;
+        }
+        
+        .amounts-section td {
+          padding: 5px;
+          border-bottom: 1px solid #ddd;
+        }
+        
+        .total-row {
+          font-weight: bold;
+          background-color: #f5f5f5;
+        }
+        
+        .signature-section {
+          margin-top: 50px;
+          text-align: right;
+          font-size: 11px;
+        }
+        
+        .signature-line {
+          margin-top: 35px;
+          border-top: 1px solid #000;
+          width: 180px;
+          margin-left: auto;
+          padding-top: 5px;
+        }
+      `,
+      bodyContent: `
+        <!-- Invoice Header -->
+        <div class="invoice-header">
+          <h1>${companySettings?.companyName || "JEWELRY STORE"}</h1>
+          <p>${companySettings?.companyAddress || "Store Address"}</p>
+          <p>Phone: ${companySettings?.companyPhone || "Phone Number"}</p>
+          <p><strong>GSTIN: ${companySettings?.companyGSTIN || "GSTIN Number"}</strong></p>
+          <p style="margin-top: 8px; font-weight: bold;">Sales Book - 1 <span style="float: right;">ORIGINAL</span></p>
+        </div>
+        
+        <!-- Bill Details -->
+        <div class="bill-details">
+          <div>
+            <p><strong>Bill No:</strong> ${invoiceId}</p>
+            <p><strong>Bill Date:</strong> ${new Date().toLocaleDateString('en-GB')}</p>
+          </div>
+          <div style="text-align: right;">
+            <p><strong>Shop:</strong> ${selectedBranch}</p>
+          </div>
+        </div>
+        
+        <!-- Party & Staff Details -->
+        <div class="party-details">
+          <p><strong>Party Name:</strong> ${customerName || "Walk-in Customer"}</p>
+          <p><strong>Mo:</strong> ${customerPhone || "N/A"}</p>
+          <p><strong>Emp Name:</strong> ${salespersonName}</p>
+        </div>
+        
+        <!-- Items Table -->
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 30px;">SNO</th>
+              <th>Item Name</th>
+              <th style="width: 80px; text-align: center;">HSN Code</th>
+              <th style="width: 70px;">Remark</th>
+              <th style="width: 45px; text-align: center;">Loct</th>
+              <th style="width: 35px; text-align: center;">Pcs</th>
+              <th style="width: 55px; text-align: right;">Weight</th>
+              <th style="width: 45px; text-align: center;">Type</th>
+              <th style="width: 70px; text-align: right;">Rate</th>
+              <th style="width: 55px; text-align: right;">Disc</th>
+              <th style="width: 75px; text-align: right;">Taxable</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${billItems.map((item, idx) => `
+              <tr>
+                <td>${idx + 1}</td>
+                <td>${item.category}</td>
+                <td class="text-center">7103</td>
+                <td>${item.subcategory || "-"}</td>
+                <td class="text-center">${item.location}</td>
+                <td class="text-center">1</td>
+                <td class="text-right">${item.weight}</td>
+                <td class="text-center">${item.type}</td>
+                <td class="text-right">${item.sellingPrice.toFixed(2)}</td>
+                <td class="text-right">${item.discount.toFixed(2)}</td>
+                <td class="text-right">${item.taxableAmount.toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        
+        <!-- Totals Section -->
+        <div class="totals-section">
+          <!-- Left: Amount in Words -->
+          <div class="words-section">
+            <p style="margin: 5px 0; font-weight: bold;">
+              Rupees: ${numberToWords(totals.finalAmount || totals.grandTotal)}
+            </p>
+            <div style="margin-top: 35px; font-size: 9px;">
+              <p style="margin: 3px 0;"><strong>GST No:</strong> ${companySettings?.companyGSTIN || "GSTIN"}</p>
+              <p style="margin: 3px 0;"><strong>State:</strong> Maharashtra</p>
+            </div>
+          </div>
+          
+          <!-- Right: Amounts -->
+          <div class="amounts-section">
+            <table>
+              <tr>
+                <td>Net Amount:</td>
+                <td class="text-right">${totals.taxable.toFixed(2)}</td>
+              </tr>
+              ${gstType === "cgst_sgst" ? `
+                <tr>
+                  <td>CGST ${gstSettings?.cgst || 1.5}%:</td>
+                  <td class="text-right">${totals.cgst.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>SGST ${gstSettings?.sgst || 1.5}%:</td>
+                  <td class="text-right">${totals.sgst.toFixed(2)}</td>
+                </tr>
+              ` : `
+                <tr>
+                  <td>IGST ${gstSettings?.igst || 3}%:</td>
+                  <td class="text-right">${totals.igst.toFixed(2)}</td>
+                </tr>
+              `}
+              <tr class="total-row">
+                <td><strong>Bill Amount:</strong></td>
+                <td class="text-right"><strong>${totals.grandTotal.toFixed(2)}</strong></td>
+              </tr>
+              ${availableCredit > 0 ? `
+                <tr>
+                  <td>Exchange Credit:</td>
+                  <td class="text-right">-${availableCredit.toFixed(2)}</td>
+                </tr>
+                <tr class="total-row">
+                  <td><strong>Final Amount:</strong></td>
+                  <td class="text-right"><strong>${totals.finalAmount.toFixed(2)}</strong></td>
+                </tr>
+              ` : ''}
+              <tr>
+                <td>Cash Received:</td>
+                <td class="text-right">${(totals.finalAmount || totals.grandTotal).toFixed(2)}</td>
+              </tr>
+              <tr>
+                <td>Outstanding:</td>
+                <td class="text-right">0.00</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+        
+        <!-- Signature -->
+        <div class="signature-section">
+          <p style="margin: 0;">For ${companySettings?.companyName || "JEWELRY STORE"}</p>
+          <div class="signature-line">
+            Authorized Signatory
+          </div>
+        </div>
+      `
+    });
+    
+    // Print the document
+    printDocument(printHTML);
+
+    // Ask if user wants to clear after print
+    setTimeout(() => {
+      const shouldClear = window.confirm(
+        "Do you want to clear the bill and start a new one?"
+      );
+
+      if (shouldClear) {
+        // Clear cache to force fresh load
+        setBranchStockCache(selectedBranch, []);
+        clearBill();
+        setBillItems([]);
+        setCustomerName("");
+        setCustomerPhone("");
+        setSalespersonName("");
+        setAvailableCredit(0);
+        clearExchangeSession();
+        loadBranchStock();
+      }
+    }, 1000);
   };
 
   // Close preview without printing
   const handleClosePreview = () => {
     setShowPreview(false);
-    
+
     const shouldClear = window.confirm(
       "Do you want to clear the bill and start a new one?"
     );
@@ -545,8 +1184,8 @@ export default function Billing() {
       1, // Pcs
       item.weight,
       item.type,
-      `₹${item.sellingPrice}`,
-      `₹${item.taxableAmount}`,
+      `Rs. ${item.sellingPrice.toFixed(2)}`,
+      `Rs. ${item.taxableAmount.toFixed(2)}`,
     ]);
 
     autoTable(doc, {
@@ -558,13 +1197,22 @@ export default function Billing() {
 
     // Totals
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.text(`Subtotal: ₹${totals.subtotal.toFixed(2)}`, 140, finalY);
-    doc.text(`Taxable: ₹${totals.taxable.toFixed(2)}`, 140, finalY + 7);
-    doc.text(`CGST (1.5%): ₹${totals.cgst.toFixed(2)}`, 140, finalY + 21);
-    doc.text(`SGST (1.5%): ₹${totals.sgst.toFixed(2)}`, 140, finalY + 21);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Subtotal: Rs. ${totals.subtotal.toFixed(2)}`, 140, finalY);
+    doc.text(`Discount: Rs. ${totals.totalDiscount.toFixed(2)}`, 140, finalY + 7);
+    doc.text(`Taxable: Rs. ${totals.taxable.toFixed(2)}`, 140, finalY + 14);
+
+    if (gstType === "cgst_sgst") {
+      doc.text(`CGST (${gstSettings?.cgst || 1.5}%): Rs. ${totals.cgst.toFixed(2)}`, 140, finalY + 21);
+      doc.text(`SGST (${gstSettings?.sgst || 1.5}%): Rs. ${totals.sgst.toFixed(2)}`, 140, finalY + 28);
+    } else {
+      doc.text(`IGST (${gstSettings?.igst || 3}%): Rs. ${totals.igst.toFixed(2)}`, 140, finalY + 21);
+    }
+
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text(`Grand Total: ₹${totals.grandTotal.toFixed(2)}`, 140, finalY + 31);
+    doc.text(`Grand Total: Rs. ${totals.grandTotal.toFixed(2)}`, 140, finalY + 38);
 
     doc.save(`Invoice_${selectedBranch}_${Date.now()}.pdf`);
     toast.success("PDF exported");
@@ -638,12 +1286,44 @@ export default function Billing() {
 
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-2 mb-6">
+              {/* Mode Toggle: New Bill / Return Bill */}
               <button
-                onClick={loadLastInvoice}
-                className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                onClick={() => {
+                  if (billMode === 'new-bill') {
+                    setBillMode('return-bill');
+                    setAvailableCredit(0);
+                  } else {
+                    cancelReturn();
+                  }
+                }}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${
+                  billMode === 'return-bill'
+                    ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
               >
-                <ShoppingCart size={16} /> Last Bill
+                {billMode === 'return-bill' ? (
+                  <>
+                    <ArrowLeft size={16} /> Back to New Bill
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw size={16} /> Sale Return
+                  </>
+                )}
               </button>
+
+              {billMode === 'new-bill' && (
+                <>
+                  <button
+                    onClick={loadLastInvoice}
+                    className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                  >
+                    <ShoppingCart size={16} /> Last Bill
+                  </button>
+                </>
+              )}
+              
               <button
                 onClick={exportToExcel}
                 className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
@@ -657,7 +1337,7 @@ export default function Billing() {
                 <Download size={16} /> PDF
               </button>
               <button
-                onClick={() => window.print()}
+                onClick={handlePrintInvoice}
                 className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
               >
                 <Printer size={16} /> Print
@@ -670,7 +1350,9 @@ export default function Billing() {
                       setCustomerName("");
                       setCustomerPhone("");
                       setSalespersonName("");
+                      setAvailableCredit(0);
                       clearBill();
+                      clearExchangeSession();
                       await loadBranchStock();
                       toast.success("Bill cleared");
                     }
@@ -682,16 +1364,113 @@ export default function Billing() {
               )}
             </div>
 
-            {/* Barcode Scanner */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                🔍 Scan Item Barcode
-              </label>
-              <BarcodeScanner
-                onScan={handleBarcodeScan}
-                placeholder="Scan barcode to add item to bill..."
-                disabled={loading}
-              />
+            {/* ============================================ */}
+            {/* NEW BILL MODE */}
+            {/* ============================================ */}
+            {billMode === 'new-bill' && (
+              <>
+                {/* Available Credit Banner (from exchange) */}
+                {availableCredit > 0 && (
+                  <div className="mb-6 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-500 dark:border-green-700 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-green-500 text-white rounded-full p-2">
+                          <RotateCcw size={20} />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-green-900 dark:text-green-300">
+                            Return Credit Available
+                          </h3>
+                          <p className="text-sm text-green-700 dark:text-green-400">
+                            This credit will be automatically deducted from the final bill
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                          ₹{availableCredit.toFixed(2)}
+                        </p>
+                        <button
+                          onClick={() => {
+                            setAvailableCredit(0);
+                            clearExchangeSession();
+                            toast.success('Exchange credit cleared');
+                          }}
+                          className="text-xs text-red-600 hover:text-red-700 dark:text-red-400"
+                        >
+                          Clear Credit
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Barcode Scanner Mode Section */}
+            <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
+                  <Scan size={18} />
+                  🔍 Barcode Scanner Mode
+                </label>
+                <button
+                  onClick={() => setScannerEnabled(!scannerEnabled)}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    scannerEnabled
+                      ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
+                </button>
+              </div>
+              
+              {scannerEnabled && (
+                <div className="space-y-3">
+                  <BarcodeScanner
+                    onScan={handleBarcodeScan}
+                    placeholder="Scan barcode to add item to bill..."
+                    disabled={loading}
+                  />
+                  
+                  {/* Scanned Queue Display */}
+                  {scannedQueue.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                          📋 Recently Scanned ({scannedQueue.length})
+                        </h4>
+                        <button
+                          onClick={clearScannedQueue}
+                          className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {scannedQueue.map((item, index) => (
+                          <div
+                            key={`${item.id}-${index}`}
+                            className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded"
+                          >
+                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                              {item.barcode}
+                            </span>
+                            <span className="text-gray-600 dark:text-gray-400">
+                              {item.category}
+                            </span>
+                            <span className="text-green-600 dark:text-green-400">✓</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
+                    💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items to bill. 
+                    Each scan adds the item with default price (editable below).
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Bill Items Table */}
@@ -807,7 +1586,7 @@ export default function Billing() {
                       <span>Taxable Amount:</span>
                       <span className="font-semibold">₹{totals.taxable.toFixed(2)}</span>
                     </div>
-                    
+
                     {gstType === "cgst_sgst" ? (
                       <>
                         <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
@@ -825,7 +1604,7 @@ export default function Billing() {
                         <span>₹{totals.igst.toFixed(2)}</span>
                       </div>
                     )}
-                    
+
                     <div className="border-t border-gray-300 dark:border-gray-700 pt-2 mt-2">
                       <div className="flex justify-between text-lg font-bold">
                         <span>Grand Total:</span>
@@ -833,6 +1612,22 @@ export default function Billing() {
                           ₹{totals.grandTotal.toFixed(2)}
                         </span>
                       </div>
+                      
+                      {/* Show credit adjustment if applicable */}
+                      {availableCredit > 0 && (
+                        <>
+                          <div className="flex justify-between text-md font-semibold text-orange-600 dark:text-orange-400 mt-2">
+                            <span>Return Credit:</span>
+                            <span>-₹{availableCredit.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-xl font-bold text-blue-600 dark:text-blue-400 mt-2 pt-2 border-t border-gray-300 dark:border-gray-700">
+                            <span>Final Amount:</span>
+                            <span>
+                              ₹{totals.finalAmount.toFixed(2)}
+                            </span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -842,15 +1637,354 @@ export default function Billing() {
                     disabled={billItems.length === 0 || !customerName.trim() || !salespersonName.trim()}
                     type="button"
                   >
-                    {billItems.length === 0 
-                      ? "Add items to bill" 
-                      : !customerName.trim() 
-                      ? "Enter customer name" 
-                      : !salespersonName.trim()
-                      ? "Enter salesperson name"
-                      : "Save Invoice & Complete Sale"}
+                    {billItems.length === 0
+                      ? "Add items to bill"
+                      : !customerName.trim()
+                        ? "Enter customer name"
+                        : !salespersonName.trim()
+                          ? "Enter salesperson name"
+                          : "Save Invoice & Complete Sale"}
                   </button>
                 </div>
+              </div>
+            )}
+              </>
+            )}
+
+            {/* ============================================ */}
+            {/* RETURN BILL MODE */}
+            {/* ============================================ */}
+            {billMode === 'return-bill' && (
+              <div className="space-y-6">
+                {/* Search Invoice Section */}
+                {!originalInvoice && (
+                  <>
+                    <div className="bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-300 dark:border-orange-700 rounded-xl p-6">
+                      <h3 className="text-xl font-bold text-orange-900 dark:text-orange-300 mb-4">
+                        🔍 Search Invoice for Return
+                      </h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
+                            Invoice ID
+                          </label>
+                          <input
+                            type="text"
+                            value={searchInvoiceId}
+                            onChange={(e) => setSearchInvoiceId(e.target.value)}
+                            placeholder="Enter invoice ID"
+                            className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
+                            Customer Phone
+                          </label>
+                          <input
+                            type="tel"
+                            value={searchPhone}
+                            onChange={(e) => setSearchPhone(e.target.value)}
+                            placeholder="Search by phone number"
+                            className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
+                          />
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={searchInvoice}
+                        disabled={searchingInvoice}
+                        className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Search size={18} />
+                        {searchingInvoice ? "Searching..." : "Search Invoice"}
+                      </button>
+                    </div>
+
+                    {/* Recent Invoices */}
+                    {recentInvoices.length > 0 && (
+                      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+                        <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+                          Recent Invoices
+                        </h4>
+                        <div className="space-y-2">
+                          {recentInvoices.map((inv) => (
+                            <button
+                              key={inv.id}
+                              onClick={() => selectInvoiceForReturn(inv)}
+                              className="w-full text-left p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                            >
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p className="font-semibold text-gray-900 dark:text-white">
+                                    {inv.invoiceId}
+                                  </p>
+                                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    {inv.customerName} • {inv.customerPhone}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-500">
+                                    {new Date(inv.createdAt).toLocaleDateString()}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-green-600 dark:text-green-400">
+                                    ₹{inv.totals?.grandTotal.toFixed(2)}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {inv.items?.length} item(s)
+                                  </p>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Invoice Return Processing */}
+                {originalInvoice && (
+                  <div className="space-y-6">
+                    {/* Invoice Details */}
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-xl p-6">
+                      <h3 className="text-xl font-bold text-blue-900 dark:text-blue-300 mb-4">
+                        📋 Original Invoice: {originalInvoice.invoiceId}
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Customer:</span>
+                          <p className="font-semibold text-gray-900 dark:text-white">
+                            {originalInvoice.customerName}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Phone:</span>
+                          <p className="font-semibold text-gray-900 dark:text-white">
+                            {originalInvoice.customerPhone || "N/A"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Date:</span>
+                          <p className="font-semibold text-gray-900 dark:text-white">
+                            {new Date(originalInvoice.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Total:</span>
+                          <p className="font-semibold text-green-600 dark:text-green-400">
+                            ₹{originalInvoice.totals?.grandTotal.toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Return Items Selection */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+                      <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+                        Select Items to Return
+                      </h4>
+                      
+                      <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-100 dark:bg-gray-700">
+                            <tr className="text-left">
+                              <th className="p-3">
+                                <input
+                                  type="checkbox"
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedReturnItems(
+                                        new Set(originalInvoice.items.map((item: any) => item.barcode))
+                                      );
+                                    } else {
+                                      setSelectedReturnItems(new Set());
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                              </th>
+                              <th className="p-3">Item</th>
+                              <th className="p-3">Barcode</th>
+                              <th className="p-3">Weight</th>
+                              <th className="p-3">Original Price</th>
+                              <th className="p-3">Return Value (50%)</th>
+                              <th className="p-3">Reason *</th>
+                              <th className="p-3">Remarks</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {originalInvoice.items?.map((item: any, idx: number) => (
+                              <tr
+                                key={idx}
+                                className={`border-b border-gray-200 dark:border-gray-700 ${
+                                  selectedReturnItems.has(item.barcode)
+                                    ? 'bg-orange-50 dark:bg-orange-900/20'
+                                    : ''
+                                }`}
+                              >
+                                <td className="p-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedReturnItems.has(item.barcode)}
+                                    onChange={() => toggleReturnItem(item.barcode)}
+                                    className="rounded"
+                                  />
+                                </td>
+                                <td className="p-3 font-medium">{item.category}</td>
+                                <td className="p-3 font-mono text-xs">{item.barcode}</td>
+                                <td className="p-3">{item.weight}</td>
+                                <td className="p-3">₹{item.sellingPrice.toFixed(2)}</td>
+                                <td className="p-3 font-bold text-orange-600 dark:text-orange-400">
+                                  ₹{(item.sellingPrice * 0.5).toFixed(2)}
+                                </td>
+                                <td className="p-3">
+                                  <select
+                                    value={returnReasons[item.barcode] || ""}
+                                    onChange={(e) => setReturnReasons({
+                                      ...returnReasons,
+                                      [item.barcode]: e.target.value
+                                    })}
+                                    disabled={!selectedReturnItems.has(item.barcode)}
+                                    className="w-full px-2 py-1 border rounded text-xs disabled:opacity-50"
+                                  >
+                                    <option value="">Select reason</option>
+                                    {RETURN_REASONS.map((reason) => (
+                                      <option key={reason} value={reason}>{reason}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="p-3">
+                                  <input
+                                    type="text"
+                                    value={returnRemarks[item.barcode] || ""}
+                                    onChange={(e) => setReturnRemarks({
+                                      ...returnRemarks,
+                                      [item.barcode]: e.target.value
+                                    })}
+                                    disabled={!selectedReturnItems.has(item.barcode)}
+                                    placeholder="Optional"
+                                    className="w-full px-2 py-1 border rounded text-xs disabled:opacity-50"
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Return Calculation */}
+                    {selectedReturnItems.size > 0 && returnCalculation && (
+                      <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-500 dark:border-green-700 rounded-xl p-6">
+                        <h4 className="text-lg font-bold text-green-900 dark:text-green-300 mb-4">
+                          💰 Return Calculation
+                        </h4>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-sm">
+                              <span>Original Total Value:</span>
+                              <span className="font-semibold">
+                                ₹{returnCalculation.totalOriginalValue.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span>Return Value (50%):</span>
+                              <span className="font-semibold">
+                                ₹{returnCalculation.totalReturnValue.toFixed(2)}
+                              </span>
+                            </div>
+                            {gstType === 'cgst_sgst' ? (
+                              <>
+                                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                                  <span>CGST ({gstSettings?.cgst || 1.5}%):</span>
+                                  <span>₹{returnCalculation.cgst.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                                  <span>SGST ({gstSettings?.sgst || 1.5}%):</span>
+                                  <span>₹{returnCalculation.sgst.toFixed(2)}</span>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                                <span>IGST ({gstSettings?.igst || 3}%):</span>
+                                <span>₹{returnCalculation.igst.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="border-t-2 border-green-500 pt-2 mt-2">
+                              <div className="flex justify-between text-xl font-bold text-green-600 dark:text-green-400">
+                                <span>Total Credit:</span>
+                                <span>₹{returnCalculation.totalCreditAmount.toFixed(2)}</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <label className="block text-sm font-medium mb-2">
+                              Settlement Mode *
+                            </label>
+                            <div className="space-y-2">
+                              {(['exchange', 'refund', 'store-credit'] as const).map((mode) => (
+                                <label
+                                  key={mode}
+                                  className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${
+                                    settlementMode === mode
+                                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                                      : 'border-gray-200 dark:border-gray-700 hover:border-green-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name="settlementMode"
+                                    value={mode}
+                                    checked={settlementMode === mode}
+                                    onChange={(e) => setSettlementMode(e.target.value as any)}
+                                    className="text-green-600"
+                                  />
+                                  <div>
+                                    <p className="font-semibold capitalize">
+                                      {mode === 'store-credit' ? 'Store Credit' : mode}
+                                    </p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                                      {mode === 'exchange' && 'Exchange for new items'}
+                                      {mode === 'refund' && 'Cash/Payment refund'}
+                                      {mode === 'store-credit' && 'Save for future purchase'}
+                                    </p>
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-6 flex gap-4">
+                          <button
+                            onClick={processReturnBill}
+                            disabled={processingReturn}
+                            className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            {processingReturn ? (
+                              "Processing..."
+                            ) : settlementMode === 'exchange' ? (
+                              <>Process Return & Add Items</>
+                            ) : (
+                              <>Process Return</>
+                            )}
+                          </button>
+                          
+                          <button
+                            onClick={cancelReturn}
+                            className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-semibold transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -27,24 +27,14 @@
 
   /* Hide non-printable elements */
   .no-print,
-  button,
   .print-hide,
   nav,
   aside,
-  header:not(.print-header),
-  footer:not(.print-footer),
   .sidebar,
   [role="navigation"],
   [role="banner"],
-  [role="complementary"],
-  input[type="text"],
-  input[type="number"],
-  input[type="date"],
-  input[type="tel"],
-  textarea,
-  select {
+  [role="complementary"] {
     display: none !important;
-    visibility: hidden !important;
   }
 
   /* Show only print content */

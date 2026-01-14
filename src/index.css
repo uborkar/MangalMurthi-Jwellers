@@ -581,29 +581,33 @@ span.flatpickr-weekday,
 
 /* Print Styles for Invoice */
 @media print {
-  body * {
-    visibility: hidden;
-  }
-  
-  .print-invoice,
-  .print-invoice * {
-    visibility: visible;
-  }
-  
-  .print-invoice {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-  }
-  
-  /* Hide non-essential elements when printing */
-  button,
+  /* Hide non-essential elements */
   .no-print,
   nav,
   aside,
-  header,
   .sidebar {
+    display: none !important;
+  }
+  
+  /* Show print sections */
+  .print-invoice,
+  .print-daily-report,
+  .print-only,
+  .invoice-print {
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 20px !important;
+    background: white !important;
+    color: black !important;
+    z-index: 99999 !important;
+  }
+  
+  /* Hide the main app container when printing */
+  #root > div:not(.print-invoice):not(.print-daily-report):not(.invoice-print) {
     display: none !important;
   }
   
@@ -623,5 +627,11 @@ span.flatpickr-weekday,
   
   tfoot {
     display: table-footer-group;
+  }
+  
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 10mm;
   }
 }

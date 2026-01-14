@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -114,7 +115,7 @@ export default function ReturnReport() {
 
   const exportToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    
+
     // Customer Returns Sheet
     if (customerReturns.length > 0) {
       const sheet1 = workbook.addWorksheet("Customer Returns");
@@ -237,35 +238,26 @@ export default function ReturnReport() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  <Building2 className="inline mr-1" size={14} />
                   Branch
                 </label>
-                <select
+                <CustomDropdown
+                  options={["All", ...BRANCHES]}
                   value={selectedBranch}
-                  onChange={(e) => setSelectedBranch(e.target.value as any)}
-                  className={inputStyle}
-                >
-                  <option value="All">All Branches</option>
-                  {BRANCHES.map(branch => (
-                    <option key={branch} value={branch}>{branch}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedBranch(val as any)}
+                  placeholder="Select Branch"
+                />
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  <Package className="inline mr-1" size={14} />
                   Return Type
                 </label>
-                <select
+                <CustomDropdown
+                  options={["all", "customer", "warehouse"]}
                   value={returnType}
-                  onChange={(e) => setReturnType(e.target.value as ReturnType)}
-                  className={inputStyle}
-                >
-                  <option value="all">All Returns</option>
-                  <option value="customer">Customer Returns</option>
-                  <option value="warehouse">Warehouse Returns</option>
-                </select>
+                  onChange={(val) => setReturnType(val as ReturnType)}
+                  placeholder="Select Type"
+                />
               </div>
             </div>
 

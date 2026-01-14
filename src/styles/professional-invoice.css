@@ -31,15 +31,9 @@
 
   /* ==================== HIDE SCREEN UI ==================== */
   .no-print,
-  button,
-  input,
-  textarea,
-  select,
   nav,
   aside,
   .sidebar,
-  header:not(.invoice-header),
-  svg:not(.barcode-svg),
   [role="navigation"] {
     display: none !important;
   }

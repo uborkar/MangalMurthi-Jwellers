@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import {
   TrendingUp,
@@ -106,14 +107,14 @@ export default function SalesReport() {
     setLoading(true);
     try {
       const allInvoices: Invoice[] = [];
-      const branches = selectedBranch === "All" 
+      const branches = selectedBranch === "All"
         ? ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"]
         : [selectedBranch];
 
       for (const branch of branches) {
         const invoicesRef = collection(db, "shops", branch, "invoices");
         const snapshot = await getDocs(invoicesRef);
-        
+
         snapshot.docs.forEach((doc) => {
           const data = doc.data() as Invoice;
           allInvoices.push(data);
@@ -128,7 +129,7 @@ export default function SalesReport() {
 
       setInvoices(filtered);
       toast.success(`Loaded ${filtered.length} invoices`);
-      
+
       // Load ledger data
       await loadLedgerData();
     } catch (error) {
@@ -142,7 +143,7 @@ export default function SalesReport() {
   // Load ledger data
   const loadLedgerData = async () => {
     try {
-      const branches = selectedBranch === "All" 
+      const branches = selectedBranch === "All"
         ? ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"]
         : [selectedBranch];
 
@@ -343,7 +344,7 @@ export default function SalesReport() {
           "Pending Amount": e.pendingAmount || 0,
           Salesperson: e.salesperson || "-",
         }));
-      
+
       if (pendingData.length > 0) {
         const pendingSheet = XLSX.utils.json_to_sheet(pendingData);
         XLSX.utils.book_append_sheet(workbook, pendingSheet, "Pending Amounts");
@@ -397,17 +398,12 @@ export default function SalesReport() {
                     <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
                       Branch
                     </label>
-                    <select
+                    <CustomDropdown
+                      options={BRANCHES}
                       value={selectedBranch}
-                      onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
-                      className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
-                    >
-                      {BRANCHES.map((b) => (
-                        <option key={b} value={b}>
-                          {b}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setSelectedBranch(val as BranchName)}
+                      placeholder="Select Branch"
+                    />
                   </div>
 
                   <div>

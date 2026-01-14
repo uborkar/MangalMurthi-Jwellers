@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import BarcodePrintSheet from "../components/common/BarcodePrintSheet";
 import { ArrowLeft, Printer, CheckCircle } from "lucide-react";
 import { getItemByBarcode, markItemsPrinted } from "../firebase/warehouseItems";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 
 interface PrintItem {
   barcodeValue: string;
@@ -104,7 +104,6 @@ export default function PrintBarcodes() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Toaster position="top-right" />
 
       {/* Print Controls - Hidden when printing */}
       <div className="no-print bg-white border-b border-gray-200 p-4 sticky top-0 z-10 shadow-sm">

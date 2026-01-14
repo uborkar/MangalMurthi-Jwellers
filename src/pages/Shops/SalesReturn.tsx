@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import {
   Search,
@@ -56,27 +57,30 @@ const WAREHOUSE_RETURN_REASONS = [
 export default function SalesReturn() {
   const [returnType, setReturnType] = useState<ReturnType>("customer-to-shop");
   const [selectedBranch, setSelectedBranch] = useState<BranchName>("Sangli");
-  
+
   // Customer Return States
   const [invoiceId, setInvoiceId] = useState("");
-  const [invoice, setInvoice] = useState<(InvoiceData & { id: string}) | null>(null);
+  const [invoice, setInvoice] = useState<(InvoiceData & { id: string }) | null>(null);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
   const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
-  
+
   // Recent Invoices States
   const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
   const [showRecentInvoices, setShowRecentInvoices] = useState(true);
   const [loadingRecent, setLoadingRecent] = useState(false);
-  
+
   // Warehouse Return States
   const [scannedItems, setScannedItems] = useState<any[]>([]);
   const [warehouseReasons, setWarehouseReasons] = useState<Record<string, string>>({});
   const [warehouseRemarks, setWarehouseRemarks] = useState<Record<string, string>>({});
-  
+
   const [searching, setSearching] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [scannerDisabled, setScannerDisabled] = useState(false); // Disable scanner when typing
+
+  // Barcode scanner mode state
+  const [scannerEnabled, setScannerEnabled] = useState(false);
 
   // Load recent invoices for the selected branch
   const loadRecentInvoices = async () => {
@@ -89,12 +93,12 @@ export default function SalesReturn() {
         limit(20)
       );
       const snap = await getDocs(q);
-      
+
       const invoices = snap.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      
+
       setRecentInvoices(invoices);
     } catch (error) {
       console.error("Error loading recent invoices:", error);
@@ -141,7 +145,7 @@ export default function SalesReturn() {
     setSearching(true);
     try {
       const foundInvoice = await getInvoiceById(selectedBranch, invoiceId.trim());
-      
+
       if (!foundInvoice) {
         toast.error(`Invoice ${invoiceId} not found in ${selectedBranch}`);
         setInvoice(null);
@@ -175,7 +179,7 @@ export default function SalesReturn() {
 
       // Get stock item from branch
       const stockItem = await getStockItemByBarcode(selectedBranch, barcode);
-      
+
       if (!stockItem) {
         toast.error(`Item ${barcode} not found in ${selectedBranch} stock`);
         return;
@@ -186,17 +190,22 @@ export default function SalesReturn() {
         return;
       }
 
-      // Add to scanned items
-      setScannedItems(prev => [...prev, {
+      // Add to scanned items (this acts as the queue)
+      setScannedItems(prev => [{
         ...stockItem,
         barcode: stockItem.barcode || stockItem.label,
-      }]);
-      
+      }, ...prev]); // Add to top of queue
+
       toast.success(`✅ Added: ${barcode}`);
     } catch (error) {
       console.error("Error scanning barcode:", error);
       toast.error("Failed to process barcode");
     }
+  };
+  
+  // Clear scanned queue
+  const clearScannedQueue = () => {
+    setScannedItems([]);
   };
 
   // Process Customer Return
@@ -251,7 +260,7 @@ export default function SalesReturn() {
 
       toast.dismiss(loadingToast);
       toast.success(`✅ ${selectedItems.size} item(s) returned to shop inventory`);
-      
+
       // Reset
       setInvoice(null);
       setInvoiceId("");
@@ -311,7 +320,7 @@ export default function SalesReturn() {
 
         // Update stock status to "returned"
         await updateBranchStockStatus(selectedBranch, item.barcode, "returned");
-        
+
         // Update warehouse item status
         try {
           const warehouseItemRef = doc(db, "warehouseItems", item.warehouseItemId || item.barcode);
@@ -327,7 +336,7 @@ export default function SalesReturn() {
 
       toast.dismiss(loadingToast);
       toast.success(`✅ ${scannedItems.length} item(s) returned to warehouse`);
-      
+
       // Reset
       setScannedItems([]);
       setWarehouseReasons({});
@@ -362,11 +371,10 @@ export default function SalesReturn() {
                   setInvoice(null);
                   setScannedItems([]);
                 }}
-                className={`p-6 rounded-xl border-2 transition-all ${
-                  returnType === "customer-to-shop"
+                className={`p-6 rounded-xl border-2 transition-all ${returnType === "customer-to-shop"
                     ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                     : "border-gray-200 dark:border-gray-800 hover:border-gray-300"
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-3 mb-2">
                   <ArrowLeft
@@ -388,11 +396,10 @@ export default function SalesReturn() {
                   setInvoice(null);
                   setScannedItems([]);
                 }}
-                className={`p-6 rounded-xl border-2 transition-all ${
-                  returnType === "shop-to-warehouse"
+                className={`p-6 rounded-xl border-2 transition-all ${returnType === "shop-to-warehouse"
                     ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
                     : "border-gray-200 dark:border-gray-800 hover:border-gray-300"
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-3 mb-2">
                   <Truck
@@ -410,10 +417,9 @@ export default function SalesReturn() {
             </div>
 
             {/* Info Banner */}
-            <div className={`mb-6 p-4 rounded-xl border ${
-                returnType === "customer-to-shop"
-                  ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
-                  : "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
+            <div className={`mb-6 p-4 rounded-xl border ${returnType === "customer-to-shop"
+                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                : "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
               }`}>
               <div className="flex items-start gap-3">
                 <AlertCircle className={returnType === "customer-to-shop" ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"} size={20} />
@@ -435,16 +441,13 @@ export default function SalesReturn() {
               <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
                 Branch *
               </label>
-              <select
+              <CustomDropdown
+                options={BRANCHES}
                 value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
-                className={inputStyle}
+                onChange={(val) => setSelectedBranch(val as BranchName)}
+                placeholder="Select Branch"
                 disabled={!!invoice || scannedItems.length > 0}
-              >
-                {BRANCHES.map((branch) => (
-                  <option key={branch} value={branch}>{branch}</option>
-                ))}
-              </select>
+              />
             </div>
 
             {/* CUSTOMER RETURN SECTION */}
@@ -528,7 +531,7 @@ export default function SalesReturn() {
                                   {new Date(inv.createdAt).toLocaleDateString()}
                                 </span>
                               </div>
-                              
+
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div className="flex items-center gap-1">
                                   <User className="text-gray-400" size={14} />
@@ -543,7 +546,7 @@ export default function SalesReturn() {
                                   </span>
                                 </div>
                               </div>
-                              
+
                               <div className="flex items-center justify-between mt-2">
                                 <div className="flex items-center gap-1">
                                   <Package className="text-gray-400" size={14} />
@@ -582,7 +585,7 @@ export default function SalesReturn() {
                         <div>
                           <h3 className="font-semibold text-green-800 dark:text-green-400">✅ Invoice Found</h3>
                           <p className="text-sm text-green-700 dark:text-green-300">
-                            Customer: <strong>{invoice.customerName || "N/A"}</strong> • 
+                            Customer: <strong>{invoice.customerName || "N/A"}</strong> •
                             Total: <strong>₹{invoice.totals.grandTotal.toLocaleString()}</strong>
                           </p>
                         </div>
@@ -648,7 +651,7 @@ export default function SalesReturn() {
                               <td className="p-3">
                                 <select
                                   value={returnReasons[item.barcode] || ""}
-                                  onChange={(e) => setReturnReasons({...returnReasons, [item.barcode]: e.target.value})}
+                                  onChange={(e) => setReturnReasons({ ...returnReasons, [item.barcode]: e.target.value })}
                                   className={inputStyle}
                                   disabled={!selectedItems.has(item.barcode)}
                                 >
@@ -662,7 +665,7 @@ export default function SalesReturn() {
                                 <input
                                   type="text"
                                   value={returnRemarks[item.barcode] || ""}
-                                  onChange={(e) => setReturnRemarks({...returnRemarks, [item.barcode]: e.target.value})}
+                                  onChange={(e) => setReturnRemarks({ ...returnRemarks, [item.barcode]: e.target.value })}
                                   placeholder="Optional"
                                   className={inputStyle}
                                   disabled={!selectedItems.has(item.barcode)}
@@ -692,22 +695,55 @@ export default function SalesReturn() {
             {/* WAREHOUSE RETURN SECTION */}
             {returnType === "shop-to-warehouse" && (
               <>
-                {/* Barcode Scanner */}
-                <div className="mb-6">
-                  <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
-                    <Scan className="inline mr-1" size={16} />
-                    Scan Item Barcode
-                  </label>
-                  <BarcodeScanner
-                    onScan={handleBarcodeScan}
-                    placeholder="Scan barcode to add item for warehouse return..."
-                    disabled={scannerDisabled}
-                  />
+                {/* Barcode Scanner Mode Section */}
+                <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
+                      <Scan size={18} />
+                      🔍 Barcode Scanner Mode
+                    </label>
+                    <button
+                      onClick={() => setScannerEnabled(!scannerEnabled)}
+                      className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                        scannerEnabled
+                          ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                          : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                      }`}
+                    >
+                      {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
+                    </button>
+                  </div>
+                  
+                  {scannerEnabled && (
+                    <div className="space-y-3">
+                      <BarcodeScanner
+                        onScan={handleBarcodeScan}
+                        placeholder="Scan barcode to add item for warehouse return..."
+                        disabled={scannerDisabled}
+                      />
+                      
+                      <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
+                        💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items for warehouse return. 
+                        Items will appear in the queue below with reason and remarks fields.
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Scanned Items */}
                 {scannedItems.length > 0 && (
                   <>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                        📋 Recently Scanned ({scannedItems.length})
+                      </h3>
+                      <button
+                        onClick={clearScannedQueue}
+                        className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 font-medium"
+                      >
+                        Clear All
+                      </button>
+                    </div>
                     <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden mb-4">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-100 dark:bg-white/10">
@@ -734,7 +770,7 @@ export default function SalesReturn() {
                               <td className="p-3">
                                 <select
                                   value={warehouseReasons[item.barcode] || ""}
-                                  onChange={(e) => setWarehouseReasons({...warehouseReasons, [item.barcode]: e.target.value})}
+                                  onChange={(e) => setWarehouseReasons({ ...warehouseReasons, [item.barcode]: e.target.value })}
                                   onFocus={() => setScannerDisabled(true)}
                                   onBlur={() => setScannerDisabled(false)}
                                   className={inputStyle}
@@ -749,7 +785,7 @@ export default function SalesReturn() {
                                 <input
                                   type="text"
                                   value={warehouseRemarks[item.barcode] || ""}
-                                  onChange={(e) => setWarehouseRemarks({...warehouseRemarks, [item.barcode]: e.target.value})}
+                                  onChange={(e) => setWarehouseRemarks({ ...warehouseRemarks, [item.barcode]: e.target.value })}
                                   onFocus={() => setScannerDisabled(true)}
                                   onBlur={() => setScannerDisabled(false)}
                                   placeholder="Optional"

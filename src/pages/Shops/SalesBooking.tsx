@@ -2,8 +2,9 @@
 import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
-import { Calendar, User, Phone, Package, Plus, Trash2, Save, FileText, Printer, Download, ShoppingCart } from "lucide-react";
+import { Calendar, Phone, Package, Plus, Trash2, Save, FileText, Printer, Download, ShoppingCart, Scan } from "lucide-react";
 import { doc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import * as XLSX from "xlsx";
@@ -14,51 +15,59 @@ import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import { getItemByBarcode } from "../../firebase/warehouseItems";
 import { createBookingLedgerEntry } from "../../firebase/ledger";
 import { useShop } from "../../context/ShopContext";
+import { createPrintHTML, printDocument } from "../../utils/printUtils";
+import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
+import { numberToWords } from "../../utils/numberToWords";
 
-type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
+type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune" | string;
 
 interface BookingItem {
   id: string;
-  barcode?: string;
-  itemName: string;
-  stoneSapphire: string; // Stone/Sapphire details
-  trNo: string; // Transfer Number
-  pieces: number;
+  barcode: string;
+  category: string; // Item name
+  subcategory?: string; // Remark/Stone details
+  location: string; // Loct
+  type: string; // Type (CP-A, CP-B, etc.)
   weight: string;
-  total: number;
+  costPrice: number;
+  sellingPrice: number; // Rate
+  discount: number; // Discount
+  taxableAmount: number; // Net Amount (after discount)
+  shopStockId?: string;
+  warehouseItemId?: string;
 }
 
-const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
+const DEFAULT_BRANCHES: string[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
 export default function SalesBooking() {
   const { branchStockCache, setBranchStockCache, currentBooking, updateBooking, clearBooking } = useShop();
-  
+
   const [selectedBranch, setSelectedBranch] = useState<BranchName>(currentBooking.branch);
-  
+
   // Customer Details - Initialize from context
   const [partyName, setPartyName] = useState(currentBooking.partyName);
   const [mobileNo, setMobileNo] = useState(currentBooking.mobileNo);
   const [deliveryDate, setDeliveryDate] = useState(currentBooking.deliveryDate);
-  
+
   // Salesperson
   const [salespersonName, setSalespersonName] = useState(currentBooking.salespersonName);
-  
+
   // Booking Items - Initialize from context
   const [bookingItems, setBookingItems] = useState<BookingItem[]>(currentBooking.items);
-  
+
   // Branch Stock
   const [branchStock, setBranchStock] = useState<BranchStockItem[]>(branchStockCache[selectedBranch] || []);
   const [loading, setLoading] = useState(false);
-  
+
   // Payment Details - Initialize from context
   const [netAmount, setNetAmount] = useState(currentBooking.netAmount);
   const [cashAdvance, setCashAdvance] = useState(currentBooking.cashAdvance);
   const [pendingAmount, setPendingAmount] = useState(currentBooking.pendingAmount);
   const [totalAmount, setTotalAmount] = useState(0);
-  
+
   // Additional Info
   const [remarks, setRemarks] = useState(currentBooking.remarks);
-  
+
   // History
   const [showHistory, setShowHistory] = useState(false);
   const [lastBooking, setLastBooking] = useState<any>(null);
@@ -66,6 +75,74 @@ export default function SalesBooking() {
   // Preview Modal
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [savedBookingData, setSavedBookingData] = useState<any>(null);
+
+  // Dynamic branches list
+  const [branches, setBranches] = useState<string[]>(DEFAULT_BRANCHES);
+
+  // Barcode scanner mode state
+  const [scannerEnabled, setScannerEnabled] = useState(false);
+  const [scannedQueue, setScannedQueue] = useState<BookingItem[]>([]);
+
+  // GST Settings
+  const [gstSettings, setGstSettings] = useState<GSTSettings | null>(null);
+  const [gstType, setGstType] = useState<"cgst_sgst" | "igst">("cgst_sgst");
+  const [companySettings, setCompanySettings] = useState<any>(null);
+
+  // Load GST settings and company info
+  useEffect(() => {
+    loadGSTSettings();
+    loadCompanySettings();
+  }, []);
+
+  const loadGSTSettings = async () => {
+    try {
+      const settings = await getGSTSettings();
+      if (settings && settings.defaultType) {
+        setGstSettings(settings);
+        setGstType(settings.defaultType);
+      } else {
+        const defaultSettings: GSTSettings = {
+          defaultType: "cgst_sgst",
+          cgst: 1.5,
+          sgst: 1.5,
+          igst: 3,
+          updatedAt: new Date().toISOString(),
+          updatedBy: "system",
+        };
+        setGstSettings(defaultSettings);
+        setGstType(defaultSettings.defaultType);
+      }
+    } catch (error) {
+      console.error("Error loading GST settings:", error);
+      const defaultSettings: GSTSettings = {
+        defaultType: "cgst_sgst",
+        cgst: 1.5,
+        sgst: 1.5,
+        igst: 3,
+        updatedAt: new Date().toISOString(),
+        updatedBy: "system",
+      };
+      setGstSettings(defaultSettings);
+      setGstType(defaultSettings.defaultType);
+    }
+  };
+
+  const loadCompanySettings = async () => {
+    try {
+      const settings = await getAppSettings();
+      setCompanySettings(settings);
+    } catch (error) {
+      console.error("Error loading company settings:", error);
+    }
+  };
+
+  // Handler to add new branch
+  const handleAddBranch = (newBranch: string) => {
+    if (!branches.includes(newBranch)) {
+      setBranches([...branches, newBranch]);
+      toast.success(`Added new branch: ${newBranch}`);
+    }
+  };
 
   // Sync with context whenever booking data changes (with debounce)
   useEffect(() => {
@@ -109,10 +186,10 @@ export default function SalesBooking() {
     setLoading(true);
     try {
       const stock = await getShopStock(selectedBranch);
-      
+
       // Cache all items
       setBranchStockCache(selectedBranch, stock);
-      
+
       // Filter only available items
       const available = stock.filter((s) => s.status === "in-branch" || !s.status);
       setBranchStock(available);
@@ -152,25 +229,40 @@ export default function SalesBooking() {
       // Get warehouse item for details
       const warehouseItem = await getItemByBarcode(barcode);
 
-      // Add to booking
+      // Add to booking with new structure
+      const sellingPrice = stockItem.sellingPrice || warehouseItem?.sellingPrice || 0;
       const newItem: BookingItem = {
         id: crypto.randomUUID(),
         barcode: barcode,
-        itemName: stockItem.category || warehouseItem?.category || "Unknown",
-        stoneSapphire: stockItem.subcategory || warehouseItem?.subcategory || "",
-        trNo: "",
-        pieces: 1,
+        category: stockItem.category || warehouseItem?.category || "Unknown",
+        subcategory: stockItem.subcategory || warehouseItem?.subcategory || "",
+        location: stockItem.location || warehouseItem?.location || "",
+        type: stockItem.type || warehouseItem?.type || "",
         weight: String(stockItem.weight || warehouseItem?.weight || "0"),
-        total: parseFloat(String(stockItem.weight || warehouseItem?.weight || "0")) * 1,
+        costPrice: stockItem.costPrice || warehouseItem?.costPrice || 0,
+        sellingPrice: sellingPrice,
+        discount: 0,
+        taxableAmount: sellingPrice,
+        shopStockId: stockItem.id,
+        warehouseItemId: warehouseItem?.id,
       };
 
-      setBookingItems((prev) => [...prev, newItem]);
-      calculateTotals();
+      const calculatedItem = calculateItemTaxable(newItem);
+      setBookingItems((prev) => [...prev, calculatedItem]);
+      
+      // Add to scanned queue for visual feedback
+      setScannedQueue((prev) => [calculatedItem, ...prev].slice(0, 10)); // Keep last 10
+      
       toast.success(`✅ Added: ${barcode}`);
     } catch (error) {
       console.error("Error scanning barcode:", error);
       toast.error("Failed to process barcode");
     }
+  };
+  
+  // Clear scanned queue
+  const clearScannedQueue = () => {
+    setScannedQueue([]);
   };
 
   // Add new item to booking
@@ -178,14 +270,26 @@ export default function SalesBooking() {
     const newItem: BookingItem = {
       id: crypto.randomUUID(),
       barcode: "",
-      itemName: "",
-      stoneSapphire: "",
-      trNo: "",
-      pieces: 1,
+      category: "",
+      subcategory: "",
+      location: "",
+      type: "",
       weight: "",
-      total: 0,
+      costPrice: 0,
+      sellingPrice: 0,
+      discount: 0,
+      taxableAmount: 0,
     };
     setBookingItems([...bookingItems, newItem]);
+  };
+
+  // Calculate item taxable amount (with discount)
+  const calculateItemTaxable = (item: BookingItem): BookingItem => {
+    const taxable = item.sellingPrice - item.discount;
+    return {
+      ...item,
+      taxableAmount: Math.max(taxable, 0),
+    };
   };
 
   // Update item field
@@ -194,14 +298,7 @@ export default function SalesBooking() {
       prev.map((item) => {
         if (item.id !== id) return item;
         const updated = { ...item, [field]: value };
-        
-        // Auto-calculate total if pieces or weight changes
-        if (field === "pieces" || field === "weight") {
-          const weight = parseFloat(updated.weight) || 0;
-          updated.total = updated.pieces * weight;
-        }
-        
-        return updated;
+        return calculateItemTaxable(updated);
       })
     );
   };
@@ -211,17 +308,41 @@ export default function SalesBooking() {
     setBookingItems((prev) => prev.filter((i) => i.id !== id));
   };
 
+  // Calculate totals with GST
+  const totals = {
+    subtotal: bookingItems.reduce((sum, item) => sum + item.sellingPrice, 0),
+    totalDiscount: bookingItems.reduce((sum, item) => sum + item.discount, 0),
+    taxable: bookingItems.reduce((sum, item) => sum + item.taxableAmount, 0),
+    gst: 0,
+    cgst: 0,
+    sgst: 0,
+    igst: 0,
+    grandTotal: 0,
+  };
+
+  // Calculate GST based on type and settings
+  if (gstSettings) {
+    const gstCalc = calculateGST(totals.taxable, gstType, gstSettings);
+    totals.cgst = gstCalc.cgst;
+    totals.sgst = gstCalc.sgst;
+    totals.igst = gstCalc.igst;
+    totals.gst = gstCalc.totalGST;
+  }
+
+  totals.grandTotal = totals.taxable + totals.gst;
+
   // Calculate totals
   const calculateTotals = () => {
-    const total = bookingItems.reduce((sum, item) => sum + item.total, 0);
+    const total = totals.grandTotal;
     setTotalAmount(total);
+    setNetAmount(total);
     setPendingAmount(total - cashAdvance);
   };
 
   // Update totals when items or advance changes
-  useState(() => {
+  useEffect(() => {
     calculateTotals();
-  });
+  }, [bookingItems, cashAdvance, gstSettings, gstType]);
 
   // Save booking
   const handleSaveBooking = async () => {
@@ -350,18 +471,332 @@ export default function SalesBooking() {
     }
   };
 
-  // Handle print from modal
+  // Handle print from modal - Use popup window for reliable printing
   const handlePrintBooking = () => {
+    if (!savedBookingData) return;
+
+    const fmt = (num: number) => (num || 0).toFixed(2);
+    const dateStr = new Date(savedBookingData.createdAt).toLocaleDateString('en-GB');
+    const timeStr = new Date(savedBookingData.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    // Calculate GST if not in saved data
+    const netAmount = savedBookingData.netAmount || 0;
+    const gstRate = gstSettings?.cgst || 1.5;
+    const cgst = (netAmount * gstRate) / 100;
+    const sgst = (netAmount * gstRate) / 100;
+    const totalWithGST = netAmount + cgst + sgst;
+
+    const itemsHtml = savedBookingData.items.map((item: any, idx: number) => {
+      const itemTaxable = (item.sellingPrice || 0) - (item.discount || 0);
+      return `
+      <tr style="height: 24px;">
+        <td style="text-align: center;">${idx + 1}</td>
+        <td>${item.category || item.itemName || ''}</td>
+        <td style="text-align: center; font-family: monospace;">${item.barcode || ''}</td>
+        <td style="text-align: center;">${item.location || ''}</td>
+        <td style="text-align: center;">1</td>
+        <td style="text-align: right;">${item.weight || ''}</td>
+        <td style="text-align: center;">${item.type || ''}</td>
+        <td style="text-align: right;">${fmt(item.sellingPrice || 0)}</td>
+        <td style="text-align: right;">${fmt(item.discount || 0)}</td>
+        <td style="text-align: right;">${fmt(item.taxableAmount || itemTaxable)}</td>
+      </tr>
+    `;
+    }).join('');
+
+    // Fill empty rows to maintain height
+    const emptyRowsCount = Math.max(0, 8 - savedBookingData.items.length);
+    const emptyRowsHtml = Array(emptyRowsCount).fill(0).map(() => `
+      <tr style="height: 24px;">
+        <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Booking - ${savedBookingData.partyName}</title>
+        <style>
+          @page { size: A4; margin: 10mm; }
+          * { box-sizing: border-box; }
+          body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 10px; 
+            color: #000; 
+            font-size: 10px;
+            line-height: 1.3;
+          }
+          
+          .invoice-header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+          }
+          
+          .invoice-header h1 {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 0 0 5px 0;
+            text-transform: uppercase;
+          }
+          
+          .invoice-header p {
+            margin: 2px 0;
+            font-size: 10px;
+          }
+          
+          .original-badge {
+            float: right;
+            border: 1px solid #000;
+            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: bold;
+          }
+          
+          .invoice-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 10px;
+          }
+          
+          .party-details {
+            margin-bottom: 10px;
+            font-size: 10px;
+            border: 1px solid #000;
+            padding: 5px;
+          }
+          
+          .party-details p {
+            margin: 2px 0;
+          }
+          
+          table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 9px; 
+            margin-bottom: 12px;
+          }
+          
+          th { 
+            border: 1px solid #000; 
+            padding: 4px; 
+            background: #f0f0f0; 
+            font-weight: bold;
+            text-align: left;
+          }
+          
+          td { 
+            border: 1px solid #000; 
+            padding: 3px 4px; 
+          }
+          
+          .totals-section {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            margin-top: 12px;
+          }
+          
+          .words-section {
+            width: 55%;
+            font-size: 9px;
+          }
+          
+          .amounts-section {
+            width: 42%;
+            border: 1px solid #000;
+          }
+          
+          .amounts-section table {
+            width: 100%;
+            font-size: 9px;
+          }
+          
+          .amounts-section td {
+            padding: 4px;
+            border-bottom: 1px solid #ddd;
+          }
+          
+          .total-row {
+            font-weight: bold;
+            background-color: #f5f5f5;
+          }
+          
+          .signature-section {
+            margin-top: 40px;
+            text-align: right;
+            font-size: 10px;
+          }
+          
+          .signature-line {
+            margin-top: 30px;
+            border-top: 1px solid #000;
+            width: 150px;
+            margin-left: auto;
+            padding-top: 5px;
+          }
+
+          @media print {
+            body { -webkit-print-color-adjust: exact; }
+          }
+        </style>
+      </head>
+      <body>
+
+        <!-- Invoice Header -->
+        <div class="invoice-header">
+          <h1>${companySettings?.companyName || "MANGALMURTHI JEWELLERY LTD"}</h1>
+          <p>Address: ${companySettings?.companyAddress || "10TH SWARN MARKET, OPERA HOUSE, Mumbai - 400004"}</p>
+          <p>Ph: ${companySettings?.companyPhone || "[Phone Number]"} | Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellery.com"}</p>
+          <p><strong>GSTIN: ${companySettings?.companyGSTIN || "[GST NUMBER]"}</strong></p>
+          <p style="margin-top: 6px; font-weight: bold;">
+            Sales Booking <span class="original-badge">ORIGINAL</span>
+          </p>
+        </div>
+        
+        <!-- Invoice Meta -->
+        <div class="invoice-meta">
+          <div>
+            <p><strong>Booking No:</strong> ${savedBookingData.bookingNo || 'N/A'}</p>
+            <p><strong>Booking Date:</strong> ${dateStr} ${timeStr}</p>
+          </div>
+          <div style="text-align: right;">
+            <p><strong>Location:</strong> ${savedBookingData.branch || selectedBranch}</p>
+            <p><strong>Delivery Date:</strong> ${savedBookingData.deliveryDate || 'N/A'}</p>
+          </div>
+        </div>
+        
+        <!-- Party & Staff Details -->
+        <div class="party-details">
+          <p><strong>Party Name:</strong> ${savedBookingData.partyName}</p>
+          <p><strong>Mo:</strong> ${savedBookingData.mobileNo || ''}</p>
+          <p><strong>Emp Name:</strong> ${savedBookingData.salespersonName || ''}</p>
+        </div>
+        
+        <!-- Items Table -->
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 25px;">SNO</th>
+              <th>ITEM NAME</th>
+              <th style="width: 80px;">BARCODE</th>
+              <th style="width: 40px;">LOCT</th>
+              <th style="width: 30px; text-align: center;">PCS</th>
+              <th style="width: 60px; text-align: right;">WEIGHT</th>
+              <th style="width: 40px;">TYPE</th>
+              <th style="width: 70px; text-align: right;">RATE</th>
+              <th style="width: 60px; text-align: right;">DISCOUNT</th>
+              <th style="width: 80px; text-align: right;">TAXABLE VALUE</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+            ${emptyRowsHtml}
+          </tbody>
+        </table>
+        
+        <!-- Totals Section -->
+        <div class="totals-section">
+          <!-- Left: Amount in Words & Description -->
+          <div class="words-section">
+            <p style="margin: 5px 0; font-weight: bold;">
+              Rupees: ${numberToWords(totalWithGST)}
+            </p>
+            <div style="margin-top: 30px; font-size: 8px;">
+              <p><strong>Remarks:</strong> ${savedBookingData.remarks || '-'}</p>
+              <p style="margin-top: 15px;"><strong>GST No:</strong> ${companySettings?.companyGSTIN || "[GST NUMBER]"}</p>
+              <p><strong>State:</strong> Maharashtra</p>
+            </div>
+          </div>
+          
+          <!-- Right: Amounts -->
+          <div class="amounts-section">
+            <table>
+              <tr>
+                <td>Net Amount:</td>
+                <td style="text-align: right;">${fmt(netAmount)}</td>
+              </tr>
+              ${gstType === "cgst_sgst" ? `
+                <tr>
+                  <td>SGST ${gstRate}%:</td>
+                  <td style="text-align: right;">${fmt(sgst)}</td>
+                </tr>
+                <tr>
+                  <td>CGST ${gstRate}%:</td>
+                  <td style="text-align: right;">${fmt(cgst)}</td>
+                </tr>
+              ` : `
+                <tr>
+                  <td>IGST ${(gstSettings?.igst || 3)}%:</td>
+                  <td style="text-align: right;">${fmt(cgst + sgst)}</td>
+                </tr>
+              `}
+              <tr class="total-row">
+                <td><strong>Bill Amount:</strong></td>
+                <td style="text-align: right;"><strong>${fmt(totalWithGST)}</strong></td>
+              </tr>
+              <tr>
+                <td>Advance Amt:</td>
+                <td style="text-align: right;">${fmt(savedBookingData.cashAdvance)}</td>
+              </tr>
+              <tr>
+                <td>Cash Amount:</td>
+                <td style="text-align: right;">${fmt(savedBookingData.cashAdvance)}</td>
+              </tr>
+              <tr class="total-row">
+                <td><strong>Bill Outstanding:</strong></td>
+                <td style="text-align: right;"><strong>${fmt(savedBookingData.pendingAmount || (totalWithGST - savedBookingData.cashAdvance))}</strong></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+        
+        <!-- Signature -->
+        <div class="signature-section">
+          <p style="margin: 0;">For: ${companySettings?.companyName || "MANGALMURTHI JEWELLERY LTD"}</p>
+          <div class="signature-line">
+            Signature
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    // ✅ SAFE: Use iframe with srcdoc (Trusted Types compliant)
+    const printFrame = printWindow.document.createElement('iframe');
+    printFrame.style.position = 'absolute';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    printFrame.style.border = 'none';
+
+    printFrame.srcdoc = html;
+    printWindow.document.body.appendChild(printFrame);
+
+    printFrame.onload = () => {
+      setTimeout(() => {
+        printFrame.contentWindow?.print();
+      }, 500);
+    };
+
     setShowPreviewModal(false);
-    setTimeout(() => {
-      window.print();
-    }, 100);
   };
 
   // Close modal and optionally clear
   const handleCloseModal = () => {
     setShowPreviewModal(false);
-    
+
     const shouldClear = window.confirm(
       "Do you want to clear the form and start a new booking?"
     );
@@ -465,7 +900,7 @@ export default function SalesBooking() {
     toast.success("Excel exported");
   };
 
-  // Export to PDF
+  // Export to PDF - Professional Format
   const exportToPDF = () => {
     if (bookingItems.length === 0) {
       toast.error("No items to export");
@@ -473,51 +908,126 @@ export default function SalesBooking() {
     }
 
     const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
 
-    // Header
-    doc.setFontSize(18);
-    doc.text("SALES BOOKING", 105, 15, { align: "center" });
+    // Company Header
+    doc.setFillColor(0, 128, 128); // Teal color
+    doc.rect(0, 0, pageWidth, 25, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    doc.text("SUWARNASPARSH JEWELLERS", pageWidth / 2, 12, { align: "center" });
+    doc.setFontSize(12);
+    doc.text("SALES BOOKING", pageWidth / 2, 20, { align: "center" });
 
-    doc.setFontSize(11);
-    doc.text(`Branch: ${selectedBranch}`, 14, 25);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 32);
-    doc.text(`Party Name: ${partyName}`, 14, 39);
-    doc.text(`Mobile: ${mobileNo}`, 14, 46);
-    doc.text(`Delivery Date: ${deliveryDate}`, 14, 53);
-    doc.text(`Salesperson: ${salespersonName}`, 14, 60);
+    // Reset text color
+    doc.setTextColor(0, 0, 0);
 
-    // Table
+    // Booking Details Box
+    doc.setDrawColor(0, 128, 128);
+    doc.setLineWidth(0.5);
+    doc.rect(14, 30, pageWidth - 28, 40);
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text("Branch:", 18, 38);
+    doc.text("Date:", 18, 46);
+    doc.text("Party Name:", 18, 54);
+    doc.text("Mobile:", 18, 62);
+
+    doc.text("Delivery Date:", pageWidth / 2, 38);
+    doc.text("Salesperson:", pageWidth / 2, 46);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(selectedBranch, 50, 38);
+    doc.text(new Date().toLocaleDateString('en-GB'), 50, 46);
+    doc.text(partyName, 50, 54);
+    doc.text(mobileNo, 50, 62);
+    doc.text(deliveryDate, pageWidth / 2 + 35, 38);
+    doc.text(salespersonName, pageWidth / 2 + 35, 46);
+
+    // Table with professional styling
     const tableData = bookingItems.map((item, idx) => [
       idx + 1,
       item.itemName,
-      item.stoneSapphire,
-      item.trNo,
+      item.stoneSapphire || "-",
+      item.trNo || "-",
       item.pieces,
       item.weight,
-      item.total.toFixed(2),
+      `₹${item.total.toFixed(2)}`,
     ]);
 
     autoTable(doc, {
-      startY: 67,
-      head: [["#", "Item Name", "Stone/Sapphire", "Tr No", "Pcs", "Weight", "Total"]],
+      startY: 75,
+      head: [["#", "Item Name", "Stone/Sapphire", "Tr No", "Pcs", "Weight", "Amount"]],
       body: tableData,
       theme: "grid",
+      headStyles: {
+        fillColor: [0, 128, 128],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        fontSize: 10,
+      },
+      bodyStyles: {
+        fontSize: 9,
+      },
+      alternateRowStyles: {
+        fillColor: [240, 248, 255],
+      },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 12 },
+        4: { halign: "center", cellWidth: 15 },
+        5: { halign: "right", cellWidth: 20 },
+        6: { halign: "right", cellWidth: 25 },
+      },
     });
 
-    // Totals
+    // Totals Box
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.text(`Items Total: ₹${totalAmount.toFixed(2)}`, 140, finalY);
-    doc.text(`Net Amount: ₹${netAmount.toFixed(2)}`, 140, finalY + 7);
-    doc.text(`Cash Advance: ₹${cashAdvance.toFixed(2)}`, 140, finalY + 14);
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Pending Amount: ₹${pendingAmount.toFixed(2)}`, 140, finalY + 24);
+    doc.setDrawColor(0, 128, 128);
+    doc.setLineWidth(0.5);
+    doc.rect(pageWidth - 80, finalY, 66, 45);
 
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Items Total:", pageWidth - 76, finalY + 10);
+    doc.text(`₹${totalAmount.toFixed(2)}`, pageWidth - 18, finalY + 10, { align: "right" });
+
+    doc.text("Net Amount:", pageWidth - 76, finalY + 18);
+    doc.text(`₹${netAmount.toFixed(2)}`, pageWidth - 18, finalY + 18, { align: "right" });
+
+    doc.text("Cash Advance:", pageWidth - 76, finalY + 26);
+    doc.setTextColor(0, 128, 0);
+    doc.text(`₹${cashAdvance.toFixed(2)}`, pageWidth - 18, finalY + 26, { align: "right" });
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Pending:", pageWidth - 76, finalY + 38);
+    doc.setTextColor(220, 0, 0);
+    doc.text(`₹${pendingAmount.toFixed(2)}`, pageWidth - 18, finalY + 38, { align: "right" });
+
+    // Remarks
+    doc.setTextColor(0, 0, 0);
     if (remarks) {
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text(`Remarks: ${remarks}`, 14, finalY + 35);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "italic");
+      doc.text(`Remarks: ${remarks}`, 14, finalY + 15);
     }
+
+    // Signatures
+    const sigY = finalY + 60;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.line(14, sigY, 60, sigY);
+    doc.line(pageWidth - 60, sigY, pageWidth - 14, sigY);
+    doc.text("Customer Signature", 14, sigY + 5);
+    doc.text("Authorized Signatory", pageWidth - 60, sigY + 5);
+
+    // Footer
+    doc.setFontSize(8);
+    doc.setTextColor(128, 128, 128);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 285);
 
     doc.save(`Booking_${partyName}_${Date.now()}.pdf`);
     toast.success("PDF exported");
@@ -530,7 +1040,251 @@ export default function SalesBooking() {
       return;
     }
 
-    window.print();
+    const bookingNo = `BKG-${Date.now().toString().slice(-5)}`;
+    
+    const printHTML = createPrintHTML({
+      title: `Sales Booking ${bookingNo}`,
+      styles: `
+        .invoice-header {
+          text-align: center;
+          border-bottom: 2px solid #000;
+          padding-bottom: 10px;
+          margin-bottom: 12px;
+        }
+        
+        .invoice-header h1 {
+          font-size: 18px;
+          font-weight: bold;
+          margin: 0 0 5px 0;
+          text-transform: uppercase;
+        }
+        
+        .invoice-header p {
+          margin: 2px 0;
+          font-size: 10px;
+        }
+        
+        .invoice-meta {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 10px;
+          font-size: 10px;
+        }
+        
+        .party-details {
+          margin-bottom: 10px;
+          font-size: 10px;
+          border: 1px solid #000;
+          padding: 5px;
+        }
+        
+        .party-details p {
+          margin: 2px 0;
+        }
+        
+        .items-table {
+          font-size: 9px;
+          margin-bottom: 12px;
+        }
+        
+        .items-table th {
+          background-color: #f0f0f0;
+          padding: 4px;
+          border-top: 1px solid #000;
+          border-bottom: 1px solid #000;
+          text-align: left;
+        }
+        
+        .items-table td {
+          padding: 3px 4px;
+          border-bottom: 1px solid #ddd;
+        }
+        
+        .totals-section {
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          margin-top: 12px;
+        }
+        
+        .words-section {
+          width: 55%;
+          font-size: 9px;
+        }
+        
+        .amounts-section {
+          width: 42%;
+          border: 1px solid #000;
+        }
+        
+        .amounts-section table {
+          width: 100%;
+          font-size: 9px;
+        }
+        
+        .amounts-section td {
+          padding: 4px;
+          border-bottom: 1px solid #ddd;
+        }
+        
+        .total-row {
+          font-weight: bold;
+          background-color: #f5f5f5;
+        }
+        
+        .signature-section {
+          margin-top: 40px;
+          text-align: right;
+          font-size: 10px;
+        }
+        
+        .signature-line {
+          margin-top: 30px;
+          border-top: 1px solid #000;
+          width: 150px;
+          margin-left: auto;
+          padding-top: 5px;
+        }
+        
+        .original-badge {
+          float: right;
+          border: 1px solid #000;
+          padding: 3px 8px;
+          font-size: 10px;
+          font-weight: bold;
+        }
+      `,
+      bodyContent: `
+        <!-- Invoice Header -->
+        <div class="invoice-header">
+          <h1>${companySettings?.companyName || "MANGALMURTHI JEWELLERY LTD"}</h1>
+          <p>Address: ${companySettings?.companyAddress || "10TH SWARN MARKET, OPERA HOUSE HOUSE, Mumbai - 400004"}</p>
+          <p>Ph: ${companySettings?.companyPhone || "[Phone Number]"} | Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellery.com"}</p>
+          <p><strong>GSTIN: ${companySettings?.companyGSTIN || "[GST NUMBER]"}</strong></p>
+          <p style="margin-top: 6px; font-weight: bold;">
+            Sales Book - 1 <span class="original-badge">ORIGINAL</span>
+          </p>
+        </div>
+        
+        <!-- Invoice Meta -->
+        <div class="invoice-meta">
+          <div>
+            <p><strong>Bill No:</strong> ${bookingNo}</p>
+            <p><strong>Bill Date:</strong> ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
+          <div style="text-align: right;">
+            <p><strong>Location:</strong> ${selectedBranch}</p>
+          </div>
+        </div>
+        
+        <!-- Party & Staff Details -->
+        <div class="party-details">
+          <p><strong>Party Name:</strong> ${partyName || "[CUSTOMER NAME]"}</p>
+          <p><strong>Mo:</strong> ${mobileNo || "[Phone No]"}</p>
+          <p><strong>Emp Name:</strong> ${salespersonName || "[Employee Name]"}</p>
+        </div>
+        
+        <!-- Items Table -->
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 25px;">SNO</th>
+              <th>ITEM NAME</th>
+              <th style="width: 80px;">BARCODE</th>
+              <th style="width: 40px;">LOCT</th>
+              <th style="width: 30px; text-align: center;">PCS</th>
+              <th style="width: 60px; text-align: right;">WEIGHT</th>
+              <th style="width: 40px;">TYPE</th>
+              <th style="width: 70px; text-align: right;">RATE</th>
+              <th style="width: 60px; text-align: right;">DISCOUNT</th>
+              <th style="width: 80px; text-align: right;">TAXABLE VALUE</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bookingItems.map((item, idx) => `
+              <tr>
+                <td>${idx + 1}</td>
+                <td>${item.category}</td>
+                <td style="font-family: monospace;">${item.barcode || ''}</td>
+                <td class="text-center">${item.location}</td>
+                <td class="text-center">1</td>
+                <td class="text-right">${item.weight}</td>
+                <td class="text-center">${item.type}</td>
+                <td class="text-right">${(item.sellingPrice || 0).toFixed(2)}</td>
+                <td class="text-right">${(item.discount || 0).toFixed(2)}</td>
+                <td class="text-right">${(item.taxableAmount || 0).toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        
+        <!-- Totals Section -->
+        <div class="totals-section">
+          <!-- Left: Amount in Words & Description -->
+          <div class="words-section">
+            <p style="margin: 5px 0; font-weight: bold;">
+              Rupees: ${numberToWords(totals.grandTotal)}
+            </p>
+            <div style="margin-top: 30px; font-size: 8px;">
+              <p><strong>Vch Desc:</strong> ORDER AMOUNT=${totals.taxable.toFixed(2)} & CASH RECEIVED VOUCHER</p>
+              <p style="margin-top: 15px;"><strong>GST No:</strong> ${companySettings?.companyGSTIN || "[GST NUMBER]"}</p>
+              <p><strong>State:</strong> Maharashtra</p>
+            </div>
+          </div>
+          
+          <!-- Right: Amounts -->
+          <div class="amounts-section">
+            <table>
+              <tr>
+                <td>Net Amount:</td>
+                <td class="text-right">${totals.taxable.toFixed(2)}</td>
+              </tr>
+              ${gstType === "cgst_sgst" ? `
+                <tr>
+                  <td>SGST ${gstSettings?.sgst || 1.5}%:</td>
+                  <td class="text-right">${totals.sgst.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>CGST ${gstSettings?.cgst || 1.5}%:</td>
+                  <td class="text-right">${totals.cgst.toFixed(2)}</td>
+                </tr>
+              ` : `
+                <tr>
+                  <td>IGST ${gstSettings?.igst || 3}%:</td>
+                  <td class="text-right">${totals.igst.toFixed(2)}</td>
+                </tr>
+              `}
+              <tr class="total-row">
+                <td><strong>Bill Amount:</strong></td>
+                <td class="text-right"><strong>${totals.grandTotal.toFixed(2)}</strong></td>
+              </tr>
+              <tr>
+                <td>Advance Amt:</td>
+                <td class="text-right">${cashAdvance.toFixed(2)}</td>
+              </tr>
+              <tr>
+                <td>Cash Amount:</td>
+                <td class="text-right">${cashAdvance.toFixed(2)}</td>
+              </tr>
+              <tr class="total-row">
+                <td><strong>Bill Outstanding:</strong></td>
+                <td class="text-right"><strong>${pendingAmount.toFixed(2)}</strong></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+        
+        <!-- Signature -->
+        <div class="signature-section">
+          <p style="margin: 0;">For: ${companySettings?.companyName || "MANGALMURTHI JEWELLERY LTD"}</p>
+          <div class="signature-line">
+            Signature
+          </div>
+        </div>
+      `
+    });
+    
+    printDocument(printHTML);
   };
 
   return (
@@ -539,6 +1293,169 @@ export default function SalesBooking() {
         title="Sales Booking - Order Management"
         description="Create and manage customer orders and bookings"
       />
+
+      {/* Print Styles */}
+      <style>{`
+        @media print {
+          /* Hide the main app container */
+          #root > div {
+            display: none !important;
+          }
+          
+          /* Show only the invoice-print section */
+          .invoice-print {
+            display: block !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            max-width: 100% !important;
+            padding: 20px !important;
+            background: white !important;
+            color: black !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            z-index: 9999 !important;
+            overflow: visible !important;
+          }
+          
+          /* Hide no-print elements */
+          .no-print {
+            display: none !important;
+          }
+          
+          /* Invoice Header */
+          .invoice-header {
+            text-align: center !important;
+            border-bottom: 2px solid #000 !important;
+            padding-bottom: 10px !important;
+            margin-bottom: 15px !important;
+          }
+          
+          .company-name {
+            font-size: 24px !important;
+            font-weight: bold !important;
+            margin-bottom: 5px !important;
+            color: #000 !important;
+          }
+          
+          .company-address {
+            font-size: 12px !important;
+            color: #000 !important;
+          }
+          
+          /* Invoice Info Grid */
+          .invoice-info {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 10px !important;
+            margin-bottom: 15px !important;
+            font-size: 11px !important;
+            color: #000 !important;
+          }
+          
+          .invoice-info-label {
+            font-weight: bold !important;
+            color: #000 !important;
+          }
+          
+          .invoice-info-value {
+            color: #000 !important;
+          }
+          
+          /* Table Styling */
+          .invoice-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            margin: 15px 0 !important;
+          }
+          
+          .invoice-table th,
+          .invoice-table td {
+            border: 1px solid #000 !important;
+            padding: 6px !important;
+            font-size: 11px !important;
+            color: #000 !important;
+          }
+          
+          .invoice-table th {
+            background-color: #f0f0f0 !important;
+            font-weight: bold !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          /* Totals Section */
+          .invoice-totals {
+            float: right !important;
+            width: 300px !important;
+            margin-top: 10px !important;
+          }
+          
+          .invoice-totals-row {
+            display: flex !important;
+            justify-content: space-between !important;
+            padding: 5px 0 !important;
+            font-size: 12px !important;
+            color: #000 !important;
+          }
+          
+          .invoice-totals-row.total {
+            border-top: 2px solid #000 !important;
+            font-weight: bold !important;
+            font-size: 14px !important;
+            padding-top: 8px !important;
+            margin-top: 5px !important;
+          }
+          
+          /* Footer */
+          .invoice-footer {
+            margin-top: 60px !important;
+            padding-top: 20px !important;
+            border-top: 1px solid #000 !important;
+            clear: both !important;
+          }
+          
+          .invoice-signatures {
+            display: flex !important;
+            justify-content: space-between !important;
+            margin-top: 40px !important;
+          }
+          
+          .invoice-signature {
+            text-align: center !important;
+            width: 200px !important;
+          }
+          
+          .invoice-signature-line {
+            border-top: 1px solid #000 !important;
+            padding-top: 5px !important;
+            margin-top: 50px !important;
+            font-size: 11px !important;
+            color: #000 !important;
+          }
+          
+          /* Payment Section */
+          .invoice-payment {
+            margin: 15px 0 !important;
+            padding: 10px !important;
+            border: 1px solid #000 !important;
+          }
+          
+          .invoice-payment-title {
+            font-weight: bold !important;
+            margin-bottom: 5px !important;
+            color: #000 !important;
+          }
+          
+          /* Page Setup */
+          @page {
+            size: A4;
+            margin: 15mm;
+          }
+        }
+      `}</style>
 
       <div className="grid grid-cols-12 gap-6">
         <div className="col-span-12">
@@ -597,20 +1514,16 @@ export default function SalesBooking() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div>
                 <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                  <User className="inline mr-1" size={14} />
                   Branch
                 </label>
-                <select
+                <CustomDropdown
+                  options={branches}
                   value={selectedBranch}
-                  onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
-                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
-                >
-                  {BRANCHES.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedBranch(val as BranchName)}
+                  onAddNew={handleAddBranch}
+                  placeholder="Select Branch"
+                  addNewPlaceholder="Add branch..."
+                />
               </div>
 
               <div>
@@ -654,31 +1567,86 @@ export default function SalesBooking() {
               </div>
             </div>
 
-            {/* Salesperson & Barcode Scanner */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                  Salesperson Name *
+            {/* Salesperson */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                Salesperson Name *
+              </label>
+              <input
+                type="text"
+                value={salespersonName}
+                onChange={(e) => setSalespersonName(e.target.value)}
+                placeholder="Enter salesperson name"
+                className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
+              />
+            </div>
+
+            {/* Barcode Scanner Mode Section */}
+            <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
+                  <Scan size={18} />
+                  🔍 Barcode Scanner Mode
                 </label>
-                <input
-                  type="text"
-                  value={salespersonName}
-                  onChange={(e) => setSalespersonName(e.target.value)}
-                  placeholder="Enter salesperson name"
-                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
-                />
+                <button
+                  onClick={() => setScannerEnabled(!scannerEnabled)}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    scannerEnabled
+                      ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
+                </button>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                  🔍 Scan Item Barcode
-                </label>
-                <BarcodeScanner
-                  onScan={handleBarcodeScan}
-                  placeholder="Scan barcode to add item from stock..."
-                  disabled={loading}
-                />
-              </div>
+              {scannerEnabled && (
+                <div className="space-y-3">
+                  <BarcodeScanner
+                    onScan={handleBarcodeScan}
+                    placeholder="Scan barcode to add item from stock..."
+                    disabled={loading}
+                  />
+                  
+                  {/* Scanned Queue Display */}
+                  {scannedQueue.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                          📋 Recently Scanned ({scannedQueue.length})
+                        </h4>
+                        <button
+                          onClick={clearScannedQueue}
+                          className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {scannedQueue.map((item, index) => (
+                          <div
+                            key={`${item.id}-${index}`}
+                            className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded"
+                          >
+                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                              {item.barcode}
+                            </span>
+                            <span className="text-gray-600 dark:text-gray-400">
+                              {item.itemName}
+                            </span>
+                            <span className="text-green-600 dark:text-green-400">✓</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
+                    💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items from branch stock to booking. 
+                    Each scan adds the item with its current weight and details.
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Booking Items */}
@@ -704,11 +1672,14 @@ export default function SalesBooking() {
                     <tr className="border-b-2 border-gray-300 dark:border-gray-700">
                       <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">SNO</th>
                       <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">ITEM NAME *</th>
-                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">STONE/SAPPHIRE</th>
-                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">TR NO</th>
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">BARCODE</th>
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">LOCT</th>
                       <th className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">PCS</th>
-                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">WEIGHT *</th>
-                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">TOTAL</th>
+                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">WEIGHT</th>
+                      <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">TYPE</th>
+                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">RATE</th>
+                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">DISCOUNT</th>
+                      <th className="p-3 text-right font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50">NET AMT</th>
                       <th className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800/50 no-print">ACTION</th>
                     </tr>
                   </thead>
@@ -722,56 +1693,71 @@ export default function SalesBooking() {
                         <td className="p-3">
                           <input
                             type="text"
-                            value={item.itemName}
-                            onChange={(e) => updateItem(item.id, "itemName", e.target.value)}
-                            placeholder="Enter item name"
+                            value={item.category}
+                            onChange={(e) => updateItem(item.id, "category", e.target.value)}
+                            placeholder="Item name"
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
                         <td className="p-3">
                           <input
                             type="text"
-                            value={item.stoneSapphire}
-                            onChange={(e) => updateItem(item.id, "stoneSapphire", e.target.value)}
-                            placeholder="Stone/Sapphire details"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            value={item.barcode}
+                            onChange={(e) => updateItem(item.id, "barcode", e.target.value)}
+                            placeholder="Barcode"
+                            className="w-32 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
                         <td className="p-3">
                           <input
                             type="text"
-                            value={item.trNo}
-                            onChange={(e) => updateItem(item.id, "trNo", e.target.value)}
-                            placeholder="Tr No"
-                            className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            value={item.location}
+                            onChange={(e) => updateItem(item.id, "location", e.target.value)}
+                            placeholder="Loct"
+                            className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
                         <td className="p-3 text-center">
-                          <input
-                            type="number"
-                            value={item.pieces}
-                            onChange={(e) => {
-                              updateItem(item.id, "pieces", Number(e.target.value));
-                              calculateTotals();
-                            }}
-                            className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
-                            min="1"
-                          />
+                          <span className="font-medium">1</span>
                         </td>
                         <td className="p-3">
                           <input
                             type="text"
                             value={item.weight}
-                            onChange={(e) => {
-                              updateItem(item.id, "weight", e.target.value);
-                              calculateTotals();
-                            }}
+                            onChange={(e) => updateItem(item.id, "weight", e.target.value)}
+                            placeholder="0.00"
+                            className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-right focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={item.type}
+                            onChange={(e) => updateItem(item.id, "type", e.target.value)}
+                            placeholder="Type"
+                            className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="number"
+                            value={item.sellingPrice || 0}
+                            onChange={(e) => updateItem(item.id, "sellingPrice", Number(e.target.value))}
                             placeholder="0.00"
                             className="w-28 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-right focus:outline-none focus:ring-2 focus:ring-primary/50"
                           />
                         </td>
+                        <td className="p-3">
+                          <input
+                            type="number"
+                            value={item.discount || 0}
+                            onChange={(e) => updateItem(item.id, "discount", Number(e.target.value))}
+                            placeholder="0.00"
+                            className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-right focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          />
+                        </td>
                         <td className="p-3 text-right font-semibold text-gray-900 dark:text-white">
-                          {item.total.toFixed(2)}
+                          ₹{(item.taxableAmount || 0).toFixed(2)}
                         </td>
                         <td className="p-3 text-center no-print">
                           <button
@@ -787,23 +1773,82 @@ export default function SalesBooking() {
 
                     {bookingItems.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="p-8 text-center text-gray-500 dark:text-gray-400">
+                        <td colSpan={11} className="p-8 text-center text-gray-500 dark:text-gray-400">
                           <Package size={48} className="mx-auto mb-2 opacity-50" />
                           <p>No items added. Scan barcode or click "Add Item" to start.</p>
                         </td>
                       </tr>
                     )}
                   </tbody>
-                  
-                  {/* Totals Footer */}
+
+                  {/* Totals Footer with GST */}
                   {bookingItems.length > 0 && (
                     <tfoot className="border-t-2 border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                       <tr>
-                        <td colSpan={6} className="p-3 text-right font-bold text-gray-700 dark:text-gray-300">
-                          TOTAL AMOUNT:
+                        <td colSpan={9} className="p-3 text-right font-bold text-gray-700 dark:text-gray-300">
+                          SUBTOTAL:
+                        </td>
+                        <td className="p-3 text-right font-bold text-gray-900 dark:text-white">
+                          ₹{totals.subtotal.toFixed(2)}
+                        </td>
+                        <td className="no-print"></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={9} className="p-3 text-right text-gray-700 dark:text-gray-300">
+                          DISCOUNT:
+                        </td>
+                        <td className="p-3 text-right text-gray-900 dark:text-white">
+                          -₹{totals.totalDiscount.toFixed(2)}
+                        </td>
+                        <td className="no-print"></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={9} className="p-3 text-right text-gray-700 dark:text-gray-300">
+                          TAXABLE AMOUNT:
+                        </td>
+                        <td className="p-3 text-right text-gray-900 dark:text-white">
+                          ₹{totals.taxable.toFixed(2)}
+                        </td>
+                        <td className="no-print"></td>
+                      </tr>
+                      {gstType === "cgst_sgst" ? (
+                        <>
+                          <tr>
+                            <td colSpan={9} className="p-3 text-right text-gray-700 dark:text-gray-300">
+                              CGST {gstSettings?.cgst || 1.5}%:
+                            </td>
+                            <td className="p-3 text-right text-gray-900 dark:text-white">
+                              ₹{totals.cgst.toFixed(2)}
+                            </td>
+                            <td className="no-print"></td>
+                          </tr>
+                          <tr>
+                            <td colSpan={9} className="p-3 text-right text-gray-700 dark:text-gray-300">
+                              SGST {gstSettings?.sgst || 1.5}%:
+                            </td>
+                            <td className="p-3 text-right text-gray-900 dark:text-white">
+                              ₹{totals.sgst.toFixed(2)}
+                            </td>
+                            <td className="no-print"></td>
+                          </tr>
+                        </>
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="p-3 text-right text-gray-700 dark:text-gray-300">
+                            IGST {gstSettings?.igst || 3}%:
+                          </td>
+                          <td className="p-3 text-right text-gray-900 dark:text-white">
+                            ₹{totals.igst.toFixed(2)}
+                          </td>
+                          <td className="no-print"></td>
+                        </tr>
+                      )}
+                      <tr className="border-t-2 border-gray-400 dark:border-gray-600">
+                        <td colSpan={9} className="p-3 text-right font-bold text-lg text-gray-700 dark:text-gray-300">
+                          GRAND TOTAL:
                         </td>
                         <td className="p-3 text-right font-bold text-lg text-primary">
-                          ₹{totalAmount.toFixed(2)}
+                          ₹{totals.grandTotal.toFixed(2)}
                         </td>
                         <td className="no-print"></td>
                       </tr>
@@ -818,25 +1863,19 @@ export default function SalesBooking() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800">
                   <label className="block text-sm font-semibold mb-2 text-blue-900 dark:text-blue-300">
-                    Net Amount *
+                    Net Amount (Grand Total)
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
                     <input
                       type="number"
-                      value={netAmount}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setNetAmount(val);
-                        setPendingAmount(val - cashAdvance);
-                      }}
-                      placeholder="0.00"
-                      className="w-full pl-8 pr-3 py-3 border-2 border-blue-300 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      step="0.01"
+                      value={totals.grandTotal.toFixed(2)}
+                      readOnly
+                      className="w-full pl-8 pr-3 py-3 border-2 border-blue-300 dark:border-blue-700 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-gray-900 dark:text-white text-lg font-semibold cursor-not-allowed"
                     />
                   </div>
                   <p className="text-xs text-blue-700 dark:text-blue-400 mt-2">
-                    Final agreed amount with customer
+                    Total with GST (Auto-calculated)
                   </p>
                 </div>
 
@@ -852,7 +1891,7 @@ export default function SalesBooking() {
                       onChange={(e) => {
                         const val = Number(e.target.value);
                         setCashAdvance(val);
-                        setPendingAmount(netAmount - val);
+                        setPendingAmount(totals.grandTotal - val);
                       }}
                       placeholder="0.00"
                       className="w-full pl-8 pr-3 py-3 border-2 border-green-300 dark:border-green-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -866,19 +1905,19 @@ export default function SalesBooking() {
 
                 <div className="p-6 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl border border-orange-200 dark:border-orange-800">
                   <label className="block text-sm font-semibold mb-2 text-orange-900 dark:text-orange-300">
-                    Pending Amount
+                    Pending Amount (Payable)
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
                     <input
                       type="number"
-                      value={pendingAmount}
+                      value={pendingAmount.toFixed(2)}
                       readOnly
                       className="w-full pl-8 pr-3 py-3 border-2 border-orange-300 dark:border-orange-700 rounded-lg bg-orange-50 dark:bg-orange-900/30 text-gray-900 dark:text-white text-lg font-semibold cursor-not-allowed"
                     />
                   </div>
                   <p className="text-xs text-orange-700 dark:text-orange-400 mt-2">
-                    Balance to be collected
+                    Balance to be collected on delivery
                   </p>
                 </div>
               </div>
@@ -953,11 +1992,10 @@ export default function SalesBooking() {
                   <div>
                     <span className="text-gray-600 dark:text-gray-400">Status:</span>
                     <p className="font-semibold capitalize">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        lastBooking.status === "pending" 
-                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                          : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                      }`}>
+                      <span className={`px-2 py-1 rounded text-xs ${lastBooking.status === "pending"
+                        ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                        : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                        }`}>
                         {lastBooking.status}
                       </span>
                     </p>
@@ -1039,7 +2077,7 @@ export default function SalesBooking() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
+            <div className="no-print flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
                 📋 Booking Preview
               </h2>
@@ -1166,7 +2204,7 @@ export default function SalesBooking() {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-between p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+            <div className="no-print flex items-center justify-between p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 Review booking before printing
               </p>

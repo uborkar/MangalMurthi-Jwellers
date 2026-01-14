@@ -26,18 +26,15 @@
     color: #000 !important;
   }
 
-  /* Hide screen elements */
-  .no-print,
-  button,
-  input,
-  textarea,
-  select,
+  /* Hide only elements with no-print class */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Hide navigation elements */
   nav,
   aside,
-  .sidebar,
-  header:not(.print-header),
-  svg:not(.barcode-svg),
-  img:not(.print-logo) {
+  .sidebar {
     display: none !important;
   }
 

@@ -37,6 +37,13 @@ import ShopTransfer from "./pages/Shops/ShopTransfer";
 import ShopTransferReport from "./pages/Shops/ShopTransferReport";
 import CAReport from "./pages/Shops/CAReport";
 import PrintBarcodes from "./pages/PrintBarcodes";
+import PrintChallan from "./pages/PrintChallan";
+import CADashboard from "./pages/CA/CADashboard";
+import PurchaseAnnexure1A from "./pages/CA/PurchaseAnnexure1A";
+import PurchaseAnnexure2A from "./pages/CA/PurchaseAnnexure2A";
+import SalesAnnexure1A from "./pages/CA/SalesAnnexure1A";
+import SalesAnnexure2A from "./pages/CA/SalesAnnexure2A";
+import GSTR1Report from "./pages/CA/GSTR1Report";
 import AppSettingsPage from "./pages/Settings/AppSettings";
 import { AuthProvider } from "./context/AuthContext";
 import { ShopProvider } from "./context/ShopContext";
@@ -56,8 +63,21 @@ export default function App() {
                 zIndex: 99999,
                 marginTop: '70px',
               },
-              duration: 3000,
+              duration: 4000,
+              // Prevent duplicate toasts
+              success: {
+                duration: 3000,
+              },
+              error: {
+                duration: 4000,
+              },
             }}
+            // Prevent showing the same toast twice
+            containerStyle={{
+              top: 70,
+            }}
+            // De-duplicate toasts by content
+            gutter={8}
           />
           <Routes>
             {/* Public Routes */}
@@ -70,6 +90,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <PrintBarcodes />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/print-challan"
+              element={
+                <ProtectedRoute>
+                  <PrintChallan />
                 </ProtectedRoute>
               }
             />
@@ -103,7 +131,15 @@ export default function App() {
               <Route path="/shops/shop-expense-report" element={<ShopExpenseReport />} />
               <Route path="/shops/shop-transfer" element={<ShopTransfer />} />
               <Route path="/shops/shop-transfer-report" element={<ShopTransferReport />} />
-              <Route path="/shops/ca-report" element={<CAReport />} />
+              {/* <Route path="/shops/ca-report" element={<CAReport />} /> */}
+
+              {/* CA Reports */}
+              <Route path="/ca/dashboard" element={<CADashboard />} />
+              <Route path="/ca/purchase-annexure-1a" element={<PurchaseAnnexure1A />} />
+              <Route path="/ca/purchase-annexure-2a" element={<PurchaseAnnexure2A />} />
+              <Route path="/ca/sales-annexure-1a" element={<SalesAnnexure1A />} />
+              <Route path="/ca/sales-annexure-2a" element={<SalesAnnexure2A />} />
+              <Route path="/ca/gstr1-report" element={<GSTR1Report />} />
 
               {/* Others Page */}
               <Route path="/profile" element={<UserProfiles />} />

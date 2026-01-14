@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import { Trash2, Printer, CheckSquare, Square } from "lucide-react";
 import { useCategories } from "../../hooks/useCategories";
@@ -29,9 +30,13 @@ interface GridItem {
 // Main Component
 // --------------------------------------------------------------------------------------
 export default function Tagging() {
-  // Dynamic Categories and Locations
-  const { categories, loading: categoriesLoading } = useCategories();
-  const { locations, loading: locationsLoading } = useLocations();
+  // Dynamic Categories and Locations from Firebase
+  const { categories: loadedCategories, loading: categoriesLoading } = useCategories();
+  const { locations: loadedLocations, loading: locationsLoading } = useLocations();
+
+  // Local state for dynamically managed categories and locations
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
 
   // Batch Inputs
   const [category, setCategory] = useState("");
@@ -55,13 +60,41 @@ export default function Tagging() {
 
   // Set default category and location when they load
   useEffect(() => {
-    if (categories.length > 0 && !category) {
-      setCategory(categories[0].name);
+    if (loadedCategories.length > 0 && categoryOptions.length === 0) {
+      const catNames = loadedCategories.map(c => c.name);
+      setCategoryOptions(catNames);
+      if (!category && catNames.length > 0) {
+        setCategory(catNames[0]);
+      }
     }
-    if (locations.length > 0 && !location) {
-      setLocation(locations[0].name);
+  }, [loadedCategories, categoryOptions, category]);
+
+  useEffect(() => {
+    if (loadedLocations.length > 0 && locationOptions.length === 0) {
+      const locNames = loadedLocations.map(l => l.name);
+      setLocationOptions(locNames);
+      if (!location && locNames.length > 0) {
+        setLocation(locNames[0]);
+      }
     }
-  }, [categories, category, locations, location]);
+  }, [loadedLocations, locationOptions, location]);
+
+  // Handlers for adding new categories/locations
+  const handleAddCategory = (newCategory: string) => {
+    if (newCategory && !categoryOptions.includes(newCategory)) {
+      setCategoryOptions(prev => [...prev, newCategory]);
+      setCategory(newCategory);
+      toast.success(`Added new category: ${newCategory}`);
+    }
+  };
+
+  const handleAddLocation = (newLocation: string) => {
+    if (newLocation && !locationOptions.includes(newLocation)) {
+      setLocationOptions(prev => [...prev, newLocation]);
+      setLocation(newLocation);
+      toast.success(`Added new location: ${newLocation}`);
+    }
+  };
 
   // --------------------------------------------------------------------------------------
   // Reserve Serials + Generate Batch
@@ -96,19 +129,19 @@ export default function Tagging() {
       }
 
       setGrid(rows);
-      
+
       // LOCK FORM after successful generation
       setFormLocked(true);
-      
+
       // Show message about gap filling if applicable
       const hasGaps = serials.length > 0 && (serials[serials.length - 1] - serials[0] + 1) > serials.length;
       const message = hasGaps
         ? `✅ Generated ${quantity} ${category} tags (Serials: ${serials.join(', ')})\n` +
-          `♻️ Reused deleted serial numbers\n` +
-          `Counter: ${counterKey}`
+        `♻️ Reused deleted serial numbers\n` +
+        `Counter: ${counterKey}`
         : `✅ Generated ${quantity} ${category} tags (Serial: ${start}-${end})\n` +
-          `Counter: ${counterKey}`;
-      
+        `Counter: ${counterKey}`;
+
       toast.success(message, { duration: 4000 });
     } catch (error) {
       console.error(error);
@@ -160,25 +193,197 @@ export default function Tagging() {
       return;
     }
 
-    const printData = selectedItems.map((item) => ({
-      barcodeValue: item.barcodeValue,
-      serial: item.serial,
-      category: category,
-      design: design,
-      location: location,
-      type: type,
-      remark: remark,
-    }));
+    // Generate HTML for printing directly
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
 
-    localStorage.setItem("print_barcodes", JSON.stringify(printData));
-    localStorage.setItem("print_item_barcodes", JSON.stringify(selectedItems.map(i => i.barcodeValue)));
-    
-    const printWindow = window.open("/print-barcodes", "_blank");
-    
     if (!printWindow) {
       toast.error("Please allow pop-ups to print labels");
       return;
     }
+
+    // Generate barcode print layout
+    const barcodesHtml = selectedItems.map(item => `
+      <div class="barcode-label">
+        <div class="barcode-info">
+          <div class="info-row">
+            <span class="label">Category:</span>
+            <span class="value">${category}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Design:</span>
+            <span class="value">${design}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Location:</span>
+            <span class="value">${location}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Type:</span>
+            <span class="value">${type}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Item:</span>
+            <span class="value">${remark}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Serial:</span>
+            <span class="value font-bold">${item.serial}</span>
+          </div>
+        </div>
+        <div class="barcode-container">
+          <svg class="barcode" data-value="${item.barcodeValue}"></svg>
+          <div class="barcode-text">${item.barcodeValue}</div>
+        </div>
+      </div>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Print Barcode Labels - ${category}</title>
+        <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { 
+            font-family: Arial, sans-serif; 
+            padding: 10mm; 
+            background: white;
+          }
+          .barcode-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10mm;
+            margin: 0 auto;
+          }
+          .barcode-label {
+            border: 2px solid #000;
+            padding: 8mm;
+            background: white;
+            page-break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+            gap: 5mm;
+          }
+          .barcode-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3mm;
+          }
+          .info-row {
+            display: flex;
+            gap: 5mm;
+            font-size: 11pt;
+          }
+          .label {
+            font-weight: bold;
+            min-width: 80px;
+          }
+          .value {
+            flex: 1;
+          }
+          .font-bold {
+            font-weight: bold;
+            font-size: 13pt;
+          }
+          .barcode-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2mm;
+            border-top: 1px solid #ccc;
+            padding-top: 5mm;
+          }
+          .barcode {
+            max-width: 100%;
+            height: auto;
+          }
+          .barcode-text {
+            font-family: monospace;
+            font-size: 12pt;
+            font-weight: bold;
+            letter-spacing: 2px;
+          }
+          @media print {
+            body { padding: 5mm; }
+            .no-print { display: none !important; }
+            @page {
+              size: A4;
+              margin: 10mm;
+            }
+          }
+          .print-header {
+            text-align: center;
+            margin-bottom: 10mm;
+            padding: 5mm;
+            border-bottom: 2px solid #000;
+          }
+          .print-header h1 {
+            font-size: 20pt;
+            margin-bottom: 2mm;
+          }
+          .print-header .subtitle {
+            font-size: 12pt;
+            color: #666;
+          }
+          .no-print {
+            text-align: center;
+            margin: 20px 0;
+          }
+          .no-print button {
+            padding: 10px 30px;
+            font-size: 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+          }
+          .no-print button:hover {
+            background: #0056b3;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="print-header">
+          <h1>MangalMurthi Jewellers</h1>
+          <div class="subtitle">Barcode Labels - ${category} (${selectedItems.length} items)</div>
+        </div>
+        
+        <div class="no-print">
+          <button onclick="window.print()">🖨️ Print Labels</button>
+        </div>
+
+        <div class="barcode-grid">
+          ${barcodesHtml}
+        </div>
+
+        <script>
+          // Generate barcodes after page loads
+          window.onload = function() {
+            const barcodes = document.querySelectorAll('.barcode');
+            barcodes.forEach(svg => {
+              const value = svg.getAttribute('data-value');
+              try {
+                JsBarcode(svg, value, {
+                  format: 'CODE128',
+                  width: 2,
+                  height: 60,
+                  displayValue: false,
+                  margin: 5
+                });
+              } catch (error) {
+                console.error('Error generating barcode:', error);
+              }
+            });
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
 
     // Mark items as printed in UI
     setGrid((prev) =>
@@ -283,38 +488,40 @@ export default function Tagging() {
               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="text-sm block mb-1 font-medium">Category</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={categoriesLoading || formLocked}
-                  >
-                    {categoriesLoading ? (
-                      <option>Loading...</option>
-                    ) : (
-                      categories.map((c) => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
-                      ))
-                    )}
-                  </select>
+                  {categoriesLoading ? (
+                    <div className="w-full p-2 border rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 animate-pulse">
+                      Loading categories...
+                    </div>
+                  ) : (
+                    <CustomDropdown
+                      options={categoryOptions}
+                      value={category}
+                      onChange={(val) => setCategory(val)}
+                      onAddNew={handleAddCategory}
+                      placeholder="Select Category"
+                      addNewPlaceholder="Add new category..."
+                      disabled={formLocked}
+                    />
+                  )}
                 </div>
 
                 <div>
                   <label className="text-sm block mb-1 font-medium">Location</label>
-                  <select
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={locationsLoading || formLocked}
-                  >
-                    {locationsLoading ? (
-                      <option>Loading...</option>
-                    ) : (
-                      locations.map((l) => (
-                        <option key={l.id} value={l.name}>{l.name}</option>
-                      ))
-                    )}
-                  </select>
+                  {locationsLoading ? (
+                    <div className="w-full p-2 border rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 animate-pulse">
+                      Loading locations...
+                    </div>
+                  ) : (
+                    <CustomDropdown
+                      options={locationOptions}
+                      value={location}
+                      onChange={(val) => setLocation(val)}
+                      onAddNew={handleAddLocation}
+                      placeholder="Select Location"
+                      addNewPlaceholder="Add new location..."
+                      disabled={formLocked}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -374,7 +581,7 @@ export default function Tagging() {
                 >
                   {reserving ? "Generating..." : "Generate Batch"}
                 </button>
-                
+
                 {formLocked && (
                   <div className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-3 py-2 rounded-lg">
                     🔒 Form locked - Serials reserved
@@ -422,15 +629,14 @@ export default function Tagging() {
               {grid.map((item, idx) => (
                 <div
                   key={item.id}
-                  className={`p-4 rounded-xl border ${
-                    item.isPrinted
-                      ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
-                      : item.isCommitted
-                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                        : item.isSelected
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                          : "border-gray-300 bg-white dark:bg-gray-900"
-                  }`}
+                  className={`p-4 rounded-xl border ${item.isPrinted
+                    ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
+                    : item.isCommitted
+                      ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                      : item.isSelected
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                        : "border-gray-300 bg-white dark:bg-gray-900"
+                    }`}
                 >
                   <div className="flex justify-between items-center mb-3">
                     <div className="flex items-center gap-3">

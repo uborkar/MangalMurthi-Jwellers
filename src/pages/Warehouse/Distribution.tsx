@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import { Check, Truck, Package, Filter as FilterIcon, ChevronDown, ChevronUp, Scan } from "lucide-react";
 
@@ -29,7 +30,7 @@ interface ShopConfig {
   type: "flagship" | "branch" | "franchise";
 }
 
-const shops: ShopConfig[] = [
+const DEFAULT_SHOPS: ShopConfig[] = [
   { code: "Sangli", name: "Sangli", location: "Sangli", type: "branch" },
   { code: "Kolhapur", name: "Kolhapur", location: "Kolhapur", type: "branch" },
   { code: "Miraj", name: "Miraj", location: "Miraj", type: "branch" },
@@ -52,10 +53,28 @@ export default function Distribution() {
   const [filterCategory, setFilterCategory] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
-  
+
   // Barcode scanner state
   const [scannerEnabled, setScannerEnabled] = useState(false);
   const [scannedQueue, setScannedQueue] = useState<WarehouseItem[]>([]);
+
+  // Dynamic shops state
+  const [shops, setShops] = useState<ShopConfig[]>(DEFAULT_SHOPS);
+
+  // Handler for adding new branches
+  const handleAddBranch = (branchName: string) => {
+    if (branchName && !shops.find(s => s.name === branchName)) {
+      const newBranch: ShopConfig = {
+        code: branchName.replace(/\s+/g, ''),
+        name: branchName,
+        location: branchName,
+        type: "branch"
+      };
+      setShops(prev => [...prev, newBranch]);
+      setSelectedShop(newBranch.code);
+      toast.success(`Added new branch: ${branchName}`);
+    }
+  };
 
   async function loadInventory() {
     try {
@@ -196,10 +215,10 @@ export default function Distribution() {
           ...prev,
           [item.id!]: true,
         }));
-        
+
         // Add to scanned queue for visual feedback
         setScannedQueue((prev) => [item, ...prev].slice(0, 10)); // Keep last 10
-        
+
         toast.success(`✅ Added: ${barcode} (${item.category})`);
       }
     } catch (error) {
@@ -207,7 +226,7 @@ export default function Distribution() {
       toast.error("Failed to process barcode");
     }
   };
-  
+
   // Clear scanned queue
   const clearScannedQueue = () => {
     setScannedQueue([]);
@@ -282,19 +301,19 @@ export default function Distribution() {
           serial: branchSerial++, // Branch-specific serial (1, 2, 3...)
           label: item.barcode,
           barcode: item.barcode,
-          
+
           // Item details (5 core fields from Tagging)
           category: item.category,
           remark: item.remark, // Item Name
           subcategory: item.subcategory, // Design
           costPriceType: item.costPriceType, // Type
           location: item.location,
-          
+
           // Additional fields
           productName: item.remark, // Alias for compatibility
           type: item.costPriceType, // Alias for compatibility
           design: item.subcategory, // Alias for compatibility
-          
+
           // Status and tracking
           status: "in-branch",
           warehouseItemId: item.id,
@@ -384,16 +403,15 @@ export default function Distribution() {
                   </label>
                   <button
                     onClick={() => setScannerEnabled(!scannerEnabled)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      scannerEnabled
-                        ? "bg-indigo-500 text-white hover:bg-indigo-600"
-                        : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
-                    }`}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${scannerEnabled
+                      ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                      }`}
                   >
                     {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
                   </button>
                 </div>
-                
+
                 {scannerEnabled && (
                   <div className="space-y-3">
                     <BarcodeScanner
@@ -401,7 +419,7 @@ export default function Distribution() {
                       placeholder="Scan barcode to add item to distribution queue..."
                       disabled={false}
                     />
-                    
+
                     {/* Scanned Queue Display */}
                     {scannedQueue.length > 0 && (
                       <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
@@ -434,32 +452,33 @@ export default function Distribution() {
                         </div>
                       </div>
                     )}
-                    
+
                     <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
-                      💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items to distribution queue. 
+                      💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items to distribution queue.
                       Items will be automatically selected and ready for transfer. Perfect for handling large quantities!
                     </div>
                   </div>
                 )}
               </div>
-              
+
               {/* Row 1: Shop Selection */}
               <div className="bg-blue-50 dark:bg-blue-500/10 border-2 border-blue-200 dark:border-blue-800/50 rounded-xl p-4">
                 <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
                   🏢 Select Destination Branch
                 </label>
-                <select
-                  className={`${inputStyle} w-full md:w-96 font-medium`}
-                  value={selectedShop}
-                  onChange={(e) => setSelectedShop(e.target.value)}
-                >
-                  <option value="">Choose destination shop...</option>
-                  {shops.map((shop) => (
-                    <option key={shop.code} value={shop.code}>
-                      {shop.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="w-full md:w-96">
+                  <CustomDropdown
+                    options={shops.map(s => s.name)}
+                    value={shops.find(s => s.code === selectedShop)?.name || ""}
+                    onChange={(val) => {
+                      const shop = shops.find(s => s.name === val);
+                      setSelectedShop(shop?.code || "");
+                    }}
+                    onAddNew={handleAddBranch}
+                    placeholder="Choose destination shop..."
+                    addNewPlaceholder="Add new branch..."
+                  />
+                </div>
               </div>
 
               {/* Row 2: Filters */}
@@ -486,16 +505,12 @@ export default function Distribution() {
 
                     <div>
                       <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">💎 Category</label>
-                      <select
-                        className={inputStyle}
-                        value={filterCategory}
-                        onChange={(e) => setFilterCategory(e.target.value)}
-                      >
-                        <option value="">All Categories</option>
-                        {allCategories.map((cat) => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </select>
+                      <CustomDropdown
+                        options={["All Categories", ...allCategories]}
+                        value={filterCategory || "All Categories"}
+                        onChange={(val) => setFilterCategory(val === "All Categories" ? "" : val)}
+                        placeholder="Filter by category"
+                      />
                     </div>
                   </div>
                 )}

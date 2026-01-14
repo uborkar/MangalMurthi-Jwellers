@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -307,40 +308,26 @@ export default function ShopTransferReport() {
 
               <div>
                 <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  <Building2 className="inline mr-1" size={14} />
                   From Shop
                 </label>
-                <select
+                <CustomDropdown
+                  options={["All", ...SHOPS]}
                   value={fromShop}
-                  onChange={(e) => setFromShop(e.target.value as ShopName | "All")}
-                  className={inputStyle}
-                >
-                  <option value="All">All Shops</option>
-                  {SHOPS.map((shop) => (
-                    <option key={shop} value={shop}>
-                      {shop}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setFromShop(val as ShopName | "All")}
+                  placeholder="Select From Shop"
+                />
               </div>
 
               <div>
                 <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  <Building2 className="inline mr-1" size={14} />
                   To Shop
                 </label>
-                <select
+                <CustomDropdown
+                  options={["All", ...SHOPS]}
                   value={toShop}
-                  onChange={(e) => setToShop(e.target.value as ShopName | "All")}
-                  className={inputStyle}
-                >
-                  <option value="All">All Shops</option>
-                  {SHOPS.map((shop) => (
-                    <option key={shop} value={shop}>
-                      {shop}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setToShop(val as ShopName | "All")}
+                  placeholder="Select To Shop"
+                />
               </div>
             </div>
 

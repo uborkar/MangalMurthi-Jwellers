@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { Boxes, Store, Settings } from "lucide-react";
+import { Boxes, Store, Settings, FileText } from "lucide-react";
 
 
 
@@ -78,7 +78,7 @@ const navItems: NavItem[] = [
         path: "/shops/branch-stock",
       },
       {
-        name: "POS Billing",
+        name: "Sale Billing",
         path: "/shops/billing",
       },
       {
@@ -113,9 +113,39 @@ const navItems: NavItem[] = [
         name: "Transfer Report",
         path: "/shops/shop-transfer-report",
       },
+      // {
+      //   name: "CA Report",
+      //   path: "/shops/ca-report",
+      // }
+    ]
+  },
+  {
+    name: "CA Reports",
+    icon: <FileText size={20} />,
+    subItems: [
       {
-        name: "CA Report",
-        path: "/shops/ca-report",
+        name: "CA Dashboard",
+        path: "/ca/dashboard",
+      },
+      {
+        name: "Purchase Annexure 1A",
+        path: "/ca/purchase-annexure-1a",
+      },
+      {
+        name: "Purchase Annexure 2A",
+        path: "/ca/purchase-annexure-2a",
+      },
+      {
+        name: "Sales Annexure 1A",
+        path: "/ca/sales-annexure-1a",
+      },
+      {
+        name: "Sales Annexure 2A",
+        path: "/ca/sales-annexure-2a",
+      },
+      {
+        name: "GSTR-1 Report",
+        path: "/ca/gstr1-report",
       }
     ]
   }

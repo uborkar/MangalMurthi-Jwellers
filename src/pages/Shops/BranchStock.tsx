@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, ChevronDown, ChevronUp, Package, Download, FileSpreadsheet, X } from "lucide-react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import * as XLSX from "xlsx";
@@ -30,7 +31,7 @@ const shops: ShopConfig[] = [
 
 const BranchStock: React.FC = () => {
   const { setBranchStockCache } = useShop();
-  
+
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [data, setData] = useState<BranchStockItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,16 +44,21 @@ const BranchStock: React.FC = () => {
   // Export ALL branches to Excel
   const exportAllBranches = async () => {
     const loadingToast = toast.loading("Preparing all branches report...");
-    
+
     try {
       const workbook = XLSX.utils.book_new();
       let grandTotal = 0;
-      const branchSummary: any[] = [];
+      const branchSummary: Array<{
+        Branch: string;
+        Location: string;
+        "Total Items": number;
+        Categories: number;
+      }> = [];
 
       // Load and export each branch
       for (const shop of shops) {
         const items = await getShopStock(shop.code);
-        
+
         if (items.length === 0) continue;
 
         grandTotal += items.length;
@@ -83,7 +89,7 @@ const BranchStock: React.FC = () => {
 
             // Reset serial to 1 for each category
             let categorySerial = 1;
-            
+
             return categoryItems.map((item) => ({
               "Sr No": categorySerial++, // Category-wise serial
               "Barcode": item.barcode,
@@ -96,8 +102,8 @@ const BranchStock: React.FC = () => {
               "Received At": item.transferredAt
                 ? new Date(item.transferredAt).toLocaleString()
                 : item.createdAt
-                ? new Date(item.createdAt).toLocaleString()
-                : "-",
+                  ? new Date(item.createdAt).toLocaleString()
+                  : "-",
             }));
           });
 
@@ -153,7 +159,7 @@ const BranchStock: React.FC = () => {
 
         // Reset serial to 1 for each category
         let categorySerial = 1;
-        
+
         return categoryItems.map((item) => ({
           "Sr No": categorySerial++, // Category-wise serial
           "Barcode": item.barcode,
@@ -166,14 +172,14 @@ const BranchStock: React.FC = () => {
           "Received At": item.transferredAt
             ? new Date(item.transferredAt).toLocaleString()
             : item.createdAt
-            ? new Date(item.createdAt).toLocaleString()
-            : "-",
+              ? new Date(item.createdAt).toLocaleString()
+              : "-",
         }));
       });
 
     // Create workbook
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    
+
     // Set column widths
     worksheet['!cols'] = [
       { wch: 8 },  // Sr No
@@ -210,20 +216,20 @@ const BranchStock: React.FC = () => {
   const loadAllBranchCounts = async () => {
     try {
       const counts: Record<string, number> = {};
-      
+
       // Load stock count for each branch
       for (const shop of shops) {
         const items = await getShopStock(shop.code);
         counts[shop.code] = items.length;
       }
-      
+
       setBranchStockCounts(counts);
-      
+
       // Auto-select branch with most stock (or first branch with stock)
       const branchesWithStock = Object.entries(counts)
-        .filter(([_, count]) => count > 0)
-        .sort(([_, a], [__, b]) => b - a); // Sort by count descending
-      
+        .filter(([, count]) => count > 0)
+        .sort(([, a], [, b]) => b - a); // Sort by count descending
+
       if (branchesWithStock.length > 0) {
         setSelectedBranch(branchesWithStock[0][0]);
       } else {
@@ -244,14 +250,14 @@ const BranchStock: React.FC = () => {
   // Load branch stock from shop's stockItems subcollection
   const loadBranchStock = async () => {
     if (!selectedBranch) return;
-    
+
     // DON'T use cache for Branch Stock - always load fresh to show sold items
     setLoading(true);
     try {
       // Get items from shop's stockItems subcollection
       const items = await getShopStock(selectedBranch);
       setData(items);
-      
+
       // Update cache for other pages (like Billing)
       const branchKey = selectedBranch as "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
       if (branchKey) {
@@ -461,24 +467,21 @@ const BranchStock: React.FC = () => {
                 <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
                   🏢 Select Branch
                 </label>
-                <select
-                  className="w-full md:w-96 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary font-medium"
-                  value={selectedBranch}
-                  onChange={(e) => {
-                    setSelectedBranch(e.target.value);
-                  }}
-                  disabled={!selectedBranch}
-                >
-                  {!selectedBranch && <option value="">Loading branches...</option>}
-                  {shops.map((shop) => {
+                <CustomDropdown
+                  options={shops.map((shop) => {
                     const count = branchStockCounts[shop.code] || 0;
-                    return (
-                      <option key={shop.code} value={shop.code}>
-                        {shop.name} {count > 0 ? `(${count} items)` : "(Empty)"}
-                      </option>
-                    );
+                    return `${shop.name} ${count > 0 ? `(${count} items)` : "(Empty)"}`;
                   })}
-                </select>
+                  value={selectedBranch ? `${shops.find(s => s.code === selectedBranch)?.name || selectedBranch} ${branchStockCounts[selectedBranch] > 0 ? `(${branchStockCounts[selectedBranch]} items)` : "(Empty)"}` : ""}
+                  onChange={(val) => {
+                    // Extract branch code from the selected value
+                    const branchName = val.split(' (')[0];
+                    const shop = shops.find(s => s.name === branchName);
+                    if (shop) setSelectedBranch(shop.code);
+                  }}
+                  placeholder="Select Branch"
+                  disabled={!selectedBranch}
+                />
                 {Object.keys(branchStockCounts).length > 0 && (
                   <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
                     💡 Auto-selected branch with most stock
@@ -662,38 +665,37 @@ const BranchStock: React.FC = () => {
                                           {item.barcode}
                                         </span>
                                       </td>
-                                    <td className="p-3 font-medium text-gray-800 dark:text-white/90">
-                                      {item.productName || item.remark || "-"}
-                                    </td>
-                                    <td className="p-3 text-gray-600 dark:text-gray-400">
-                                      {item.subcategory || item.design || "-"}
-                                    </td>
-                                    <td className="p-3 text-gray-600 dark:text-gray-400">
-                                      {item.costPriceType || item.type || "-"}
-                                    </td>
-                                    <td className="p-3 text-gray-600 dark:text-gray-400">
-                                      {item.location || "-"}
-                                    </td>
-                                    <td className="p-3">
-                                      <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${
-                                        item.status === "sold"
+                                      <td className="p-3 font-medium text-gray-800 dark:text-white/90">
+                                        {item.productName || item.remark || "-"}
+                                      </td>
+                                      <td className="p-3 text-gray-600 dark:text-gray-400">
+                                        {item.subcategory || item.design || "-"}
+                                      </td>
+                                      <td className="p-3 text-gray-600 dark:text-gray-400">
+                                        {item.costPriceType || item.type || "-"}
+                                      </td>
+                                      <td className="p-3 text-gray-600 dark:text-gray-400">
+                                        {item.location || "-"}
+                                      </td>
+                                      <td className="p-3">
+                                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${item.status === "sold"
                                           ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
                                           : item.status === "returned"
-                                          ? "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400"
-                                          : "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400"
-                                      }`}>
-                                        {item.status === "in-branch" ? "Available" : item.status === "sold" ? "Sold" : item.status || "Available"}
-                                      </span>
-                                    </td>
-                                    <td className="p-3 text-xs text-gray-500 dark:text-gray-400">
-                                      {item.transferredAt
-                                        ? new Date(item.transferredAt).toLocaleString()
-                                        : item.createdAt
-                                          ? new Date(item.createdAt).toLocaleString()
-                                          : "-"}
-                                    </td>
-                                  </tr>
-                                );
+                                            ? "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400"
+                                            : "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400"
+                                          }`}>
+                                          {item.status === "in-branch" ? "Available" : item.status === "sold" ? "Sold" : item.status || "Available"}
+                                        </span>
+                                      </td>
+                                      <td className="p-3 text-xs text-gray-500 dark:text-gray-400">
+                                        {item.transferredAt
+                                          ? new Date(item.transferredAt).toLocaleString()
+                                          : item.createdAt
+                                            ? new Date(item.createdAt).toLocaleString()
+                                            : "-"}
+                                      </td>
+                                    </tr>
+                                  );
                                 })}
                               </tbody>
                             </table>

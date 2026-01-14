@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -114,7 +115,7 @@ export default function CAReport() {
   const loadReportData = async () => {
     setLoading(true);
     try {
-      const branches = selectedBranch === "All" 
+      const branches = selectedBranch === "All"
         ? ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"]
         : [selectedBranch];
 
@@ -163,7 +164,7 @@ export default function CAReport() {
         totalRevenue += inv.totals.grandTotal;
         totalGST += inv.totals.gst;
         totalDiscount += inv.totals.totalDiscount;
-        
+
         inv.items.forEach((item) => {
           totalItems += item.qty;
           const cat = item.category;
@@ -186,7 +187,7 @@ export default function CAReport() {
         totalCost += item.costPrice;
         totalPurchaseItems += item.quantity;
         totalWeight += parseFloat(item.weight);
-        
+
         const cat = item.category;
         if (!purchaseCategoryWise[cat]) {
           purchaseCategoryWise[cat] = { cost: 0, items: 0, weight: 0 };
@@ -406,17 +407,12 @@ export default function CAReport() {
                 <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
                   Branch
                 </label>
-                <select
+                <CustomDropdown
+                  options={BRANCHES}
                   value={selectedBranch}
-                  onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
-                  className={inputStyle}
-                >
-                  {BRANCHES.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedBranch(val as BranchName)}
+                  placeholder="Select Branch"
+                />
               </div>
             </div>
 

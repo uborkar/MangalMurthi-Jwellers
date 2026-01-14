@@ -2,8 +2,9 @@
 import { useState, useEffect, useMemo } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
-import { Plus, Trash2, Save, Calendar, Building2, AlertCircle, Printer } from "lucide-react";
+import { Plus, Trash2, Save, Calendar, AlertCircle, Printer } from "lucide-react";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
 
@@ -11,15 +12,10 @@ import { db } from "../../firebase/config";
 // TYPE DEFINITIONS (LOCKED)
 // ═══════════════════════════════════════════════════════════════════════
 
-type BranchName = "Sangli" | "Satara1" | "Satara2" | "Karad1" | "Karad2" | "Kolhapur" | "Aurangabad";
+type BranchName = "Sangli" | "Satara1" | "Satara2" | "Karad1" | "Karad2" | "Kolhapur" | "Aurangabad" | string;
 
-type ExpenseCategory =
-  | "Shop Expense"
-  | "Incentive"
-  | "Salary"
-  | "Food Expense"
-  | "Travel Expense"
-  | "Cash Transfer";
+// ExpenseCategory is now dynamic (string) to allow adding new categories
+type ExpenseCategory = string;
 
 interface TransactionEntry {
   label: string;
@@ -54,7 +50,7 @@ const BRANCHES: BranchName[] = [
   "Aurangabad",
 ];
 
-const EXPENSE_CATEGORIES: ExpenseCategory[] = [
+const DEFAULT_EXPENSE_CATEGORIES: string[] = [
   "Shop Expense",
   "Incentive",
   "Salary",
@@ -117,6 +113,26 @@ export default function ShopExpense() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // State: Dynamic categories and branches (can be extended)
+  const [expenseCategories, setExpenseCategories] = useState<string[]>(DEFAULT_EXPENSE_CATEGORIES);
+  const [branches, setBranches] = useState<string[]>(BRANCHES);
+
+  // Handler to add new category
+  const handleAddCategory = (newCategory: string) => {
+    if (!expenseCategories.includes(newCategory)) {
+      setExpenseCategories([...expenseCategories, newCategory]);
+      toast.success(`Added new category: ${newCategory}`);
+    }
+  };
+
+  // Handler to add new branch
+  const handleAddBranch = (newBranch: string) => {
+    if (!branches.includes(newBranch)) {
+      setBranches([...branches, newBranch]);
+      toast.success(`Added new branch: ${newBranch}`);
+    }
+  };
+
   // Load existing expenses when date/branch changes
   useEffect(() => {
     loadExpenses();
@@ -132,12 +148,12 @@ export default function ShopExpense() {
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        
+
         // Load transactions
         if (data.transactions) {
           setTransactions(data.transactions);
         }
-        
+
         // Load expense rows
         const loadedRows: ExpenseRow[] = data.entries.map((entry: DailyExpenseEntry) => ({
           ...entry,
@@ -293,9 +309,160 @@ export default function ShopExpense() {
     }
   };
 
-  // Print daily report
+  // Print daily report - Use popup window for reliable printing
   const handlePrint = () => {
-    window.print();
+    const printWindow = window.open("", "_blank", "width=800,height=600");
+    if (!printWindow) {
+      toast.error("Please allow popups for printing");
+      return;
+    }
+
+    // Calculate totals
+    const totalTransactions = transactions.reduce((sum, t) => sum + t.amount, 0);
+    const totalExpenses = expenseRows.reduce((sum, e) => sum + e.amount, 0);
+    const netBalance = totalTransactions - totalExpenses;
+
+    const transactionRows = transactions.map((t, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${t.label}</td>
+        <td>${t.description || '-'}</td>
+        <td style="text-align:right">₹${t.amount.toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    const expenseRowsHtml = expenseRows.map((x, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${x.category}</td>
+        <td>${x.description || '-'}</td>
+        <td style="text-align:right">₹${x.amount.toFixed(2)}</td>
+        <td>${x.remarks || '-'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Daily Report - ${selectedBranch} - ${new Date(selectedDate).toLocaleDateString('en-GB')}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; padding: 20px; color: #000; }
+          .header { text-align: center; margin-bottom: 20px; }
+          .header h1 { font-size: 24px; font-weight: bold; }
+          .header h2 { font-size: 18px; background: #ff0000; color: white; padding: 8px; margin: 10px 0; }
+          .header p { font-size: 14px; margin: 5px 0; }
+          table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+          th { background: #ffff00; padding: 10px; text-align: left; border: 1px solid #000; font-weight: bold; }
+          td { padding: 8px; border: 1px solid #000; background: #ffff99; }
+          tfoot td { background: #ffff00; font-weight: bold; }
+          .section-title { font-size: 16px; font-weight: bold; margin: 20px 0 10px; padding: 5px; background: #333; color: white; }
+          .balance-box { background: #ff0000; color: white; padding: 15px; margin-top: 20px; text-align: center; }
+          .balance-box h3 { font-size: 18px; margin-bottom: 10px; }
+          .balance-row { display: flex; justify-content: space-between; padding: 5px 0; max-width: 400px; margin: 0 auto; }
+          .signature-area { display: flex; justify-content: space-between; margin-top: 50px; }
+          .signature { text-align: center; width: 200px; }
+          .signature-line { border-top: 1px solid #000; padding-top: 5px; margin-top: 50px; }
+          @media print { body { padding: 10px; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>MangalMurthi JEWELLERS</h1>
+          <h2>DAILY REPORT</h2>
+          <p>Date: ${new Date(selectedDate).toLocaleDateString('en-GB')}</p>
+          <p style="font-weight:bold">${selectedBranch}</p>
+        </div>
+
+        <div class="section-title">TRANSACTIONS / INCOME</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:50px">#</th>
+              <th>Label</th>
+              <th>Description</th>
+              <th style="width:120px">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transactionRows || '<tr><td colspan="4" style="text-align:center">No transactions</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3" style="text-align:right">TOTAL INCOME:</td>
+              <td style="text-align:right">₹${totalTransactions.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div class="section-title">EXPENSES</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:50px">#</th>
+              <th>Category</th>
+              <th>Description</th>
+              <th style="width:120px">Amount</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${expenseRowsHtml || '<tr><td colspan="5" style="text-align:center">No expenses</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3" style="text-align:right">TOTAL EXPENSE:</td>
+              <td style="text-align:right">₹${totalExpenses.toFixed(2)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div class="balance-box">
+          <h3>DAILY BALANCE SUMMARY</h3>
+          <div class="balance-row"><span>Total Income:</span> <span>₹${totalTransactions.toFixed(2)}</span></div>
+          <div class="balance-row"><span>Total Expense:</span> <span>₹${totalExpenses.toFixed(2)}</span></div>
+          <div class="balance-row" style="border-top:2px solid white; margin-top:10px; padding-top:10px; font-size:18px; font-weight:bold;">
+            <span>NET BALANCE:</span> <span>₹${netBalance.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div class="signature-area">
+          <div class="signature">
+            <div class="signature-line">Prepared By</div>
+          </div>
+          <div class="signature">
+            <div class="signature-line">Verified By</div>
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    // ✅ SAFE: Use iframe with srcdoc (Trusted Types compliant)
+    const printFrame = printWindow.document.createElement('iframe');
+    printFrame.style.position = 'absolute';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    printFrame.style.border = 'none';
+
+    printFrame.srcdoc = html;
+    printWindow.document.body.appendChild(printFrame);
+
+    printFrame.onload = () => {
+      setTimeout(() => {
+        printFrame.contentWindow?.print();
+      }, 500);
+    };
   };
 
   // Input styles
@@ -312,53 +479,74 @@ export default function ShopExpense() {
       {/* Print Styles */}
       <style>{`
         @media print {
-          body * {
-            visibility: hidden;
+          /* Hide the main app container */
+          #root > div {
+            display: none !important;
           }
           
-          .print-daily-report, .print-daily-report * {
-            visibility: visible;
-          }
-          
+          /* Show only the print section */
           .print-daily-report {
             display: block !important;
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            padding: 20px;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            padding: 20px !important;
+            background: white !important;
+            color: black !important;
+            z-index: 9999 !important;
           }
           
+          /* Hide no-print elements */
           .no-print {
             display: none !important;
           }
           
-          table {
-            border-collapse: collapse;
-            width: 100%;
+          /* Table styling */
+          .print-daily-report table {
+            border-collapse: collapse !important;
+            width: 100% !important;
+            page-break-inside: auto !important;
           }
           
-          th, td {
+          .print-daily-report th,
+          .print-daily-report td {
             border: 1px solid black !important;
             padding: 8px !important;
+            color: black !important;
           }
           
-          thead {
+          .print-daily-report thead {
             background-color: #ffff00 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           
-          tbody tr {
+          .print-daily-report tbody tr {
             background-color: #ffff99 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           
-          tfoot {
+          .print-daily-report tfoot {
             background-color: #ffff00 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          /* Balance section */
+          .print-daily-report .balance-section {
+            background-color: #ff0000 !important;
+            color: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          /* Page setup */
+          @page {
+            size: A4;
+            margin: 15mm;
           }
         }
       `}</style>
@@ -367,7 +555,7 @@ export default function ShopExpense() {
         <div className="col-span-12">
           <TASection
             title="📒 Daily Report"
-            subtitle="Suwarnasparsh Jewellers - Branch Accounting"
+            subtitle="MangalMurthi  Jewellers - Branch Accounting"
           >
             {/* Info Banner */}
             <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl no-print">
@@ -378,7 +566,7 @@ export default function ShopExpense() {
                     📋 Daily Report Format
                   </h3>
                   <p className="text-sm text-amber-800 dark:text-amber-300">
-                    This page records daily transactions (top) and expenses (bottom). 
+                    This page records daily transactions (top) and expenses (bottom).
                     Balance = Total Transaction - Total Expenses.
                   </p>
                 </div>
@@ -403,21 +591,16 @@ export default function ShopExpense() {
 
               <div>
                 <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  <Building2 className="inline mr-1" size={14} />
                   Branch *
                 </label>
-                <select
+                <CustomDropdown
+                  options={branches}
                   value={selectedBranch}
-                  onChange={(e) => setSelectedBranch(e.target.value as BranchName)}
-                  className={inputStyle}
-                  required
-                >
-                  {BRANCHES.map((branch) => (
-                    <option key={branch} value={branch}>
-                      {branch}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedBranch(val as BranchName)}
+                  onAddNew={handleAddBranch}
+                  placeholder="Select Branch"
+                  addNewPlaceholder="Add branch..."
+                />
               </div>
             </div>
 
@@ -425,7 +608,7 @@ export default function ShopExpense() {
             <div id="printable-report">
               {/* Header (Print Only) */}
               <div style={{ display: 'none' }} className="print:block text-center mb-4">
-                <h1 className="text-2xl font-bold" style={{ color: 'black' }}>SUWARNASPARSH JEWELLERS</h1>
+                <h1 className="text-2xl font-bold" style={{ color: 'black' }}>MangalMurthi  JEWELLERS</h1>
                 <h2 className="text-xl font-bold py-2" style={{ backgroundColor: '#ff0000', color: 'white' }}>DAILY REPORT</h2>
                 <p className="text-lg" style={{ color: 'black' }}>Date: {new Date(selectedDate).toLocaleDateString('en-GB')}</p>
                 <p className="text-lg font-bold" style={{ color: 'black' }}>{selectedBranch}</p>
@@ -513,20 +696,14 @@ export default function ShopExpense() {
                           className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5 print:bg-yellow-100"
                         >
                           <td className="p-3 border border-gray-300 dark:border-gray-700">
-                            <select
+                            <CustomDropdown
+                              options={expenseCategories}
                               value={row.category}
-                              onChange={(e) =>
-                                updateRow(row.id, "category", e.target.value as ExpenseCategory)
-                              }
-                              className="w-full bg-transparent border-none outline-none text-gray-800 dark:text-white/90 print:border-0"
-                              required
-                            >
-                              {EXPENSE_CATEGORIES.map((cat) => (
-                                <option key={cat} value={cat}>
-                                  {cat}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(val) => updateRow(row.id, "category", val as ExpenseCategory)}
+                              onAddNew={handleAddCategory}
+                              placeholder="Select Category"
+                              addNewPlaceholder="Add category..."
+                            />
                           </td>
                           <td className="p-3 border border-gray-300 dark:border-gray-700">
                             <input
@@ -627,8 +804,8 @@ export default function ShopExpense() {
             {/* Summary Info */}
             <div className="mt-4 p-4 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-gray-800 rounded-xl no-print">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                <strong>📊 Summary:</strong> Transaction: ₹{totalTransaction.toLocaleString()} | 
-                Expenses: ₹{totalExpense.toLocaleString()} | 
+                <strong>📊 Summary:</strong> Transaction: ₹{totalTransaction.toLocaleString()} |
+                Expenses: ₹{totalExpense.toLocaleString()} |
                 Balance: <strong className={balance >= 0 ? "text-green-600" : "text-red-600"}>
                   ₹{balance.toLocaleString()}
                 </strong>
@@ -642,7 +819,7 @@ export default function ShopExpense() {
       <div className="print-daily-report" style={{ display: "none" }}>
         {/* Header */}
         <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: "10px", marginBottom: "15px" }}>
-          <h1 style={{ fontSize: "24px", fontWeight: "bold", margin: "0" }}>SUWARNASPARSH JEWELLERS</h1>
+          <h1 style={{ fontSize: "24px", fontWeight: "bold", margin: "0" }}>MangalMurthi  JEWELLERS</h1>
           <h2 style={{ fontSize: "18px", fontWeight: "bold", backgroundColor: "#ff0000", color: "white", padding: "8px", margin: "10px 0" }}>DAILY REPORT</h2>
           <p style={{ fontSize: "16px", margin: "5px 0" }}>Date: {new Date(selectedDate).toLocaleDateString('en-GB')}</p>
           <p style={{ fontSize: "16px", fontWeight: "bold", margin: "5px 0" }}>{selectedBranch}</p>

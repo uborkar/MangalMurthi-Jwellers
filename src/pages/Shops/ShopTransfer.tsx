@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Download, Printer, Plus, Trash2, Package, TrendingUp, AlertCircle, Search } from "lucide-react";
+import { Download, Printer, Plus, Trash2, Package, TrendingUp, AlertCircle, Search, Scan } from "lucide-react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
+import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import {
@@ -55,6 +56,10 @@ const ShopTransfer: React.FC = () => {
   const [transferRows, setTransferRows] = useState<TransferRow[]>([]);
   const [transportBy, setTransportBy] = useState("");
   const [remarks, setRemarks] = useState("");
+
+  // Barcode scanner mode state
+  const [scannerEnabled, setScannerEnabled] = useState(false);
+  const [scannedQueue, setScannedQueue] = useState<TransferRow[]>([]);
 
   // Load stock from Firebase when fromShop changes
   useEffect(() => {
@@ -153,21 +158,30 @@ const ShopTransfer: React.FC = () => {
     };
 
     setTransferRows((prev) => [...prev, row]);
+    
+    // Add to scanned queue for visual feedback
+    setScannedQueue((prev) => [row, ...prev].slice(0, 10)); // Keep last 10
+    
     toast.success(`Scanned: ${barcode}`);
+  };
+  
+  // Clear scanned queue
+  const clearScannedQueue = () => {
+    setScannedQueue([]);
   };
 
   const addManualRow = () => {
     setTransferRows((prev) => [
       ...prev,
-      { 
-        label: "", 
+      {
+        label: "",
         barcode: "",
-        category: "", 
+        category: "",
         subcategory: "",
         location: "", // MUST HAVE
         type: "",
-        weight: "", 
-        quantity: 1 
+        weight: "",
+        quantity: 1
       },
     ]);
   };
@@ -231,7 +245,7 @@ const ShopTransfer: React.FC = () => {
 
     try {
       console.log("Initiating transfer from", fromShop, "to", toShop);
-      
+
       // Prepare transfer payload
       const payload: ShopTransferPayload = {
         fromShop,
@@ -261,7 +275,7 @@ const ShopTransfer: React.FC = () => {
 
       toast.dismiss(loadingToast);
       toast.success(`✅ Transfer ${log.transferNo} completed!`);
-      
+
       if (log.missingLabels && log.missingLabels.length > 0) {
         toast.error(`⚠️ Missing items: ${log.missingLabels.join(", ")}`, {
           duration: 5000,
@@ -277,11 +291,11 @@ const ShopTransfer: React.FC = () => {
       setRemarks("");
       setLabelSearch("");
       setSelectedFoundItem(null);
-      
+
       // Reload stock
       const updatedStock = await getShopStock(fromShop);
       setBranchStock((prev) => ({ ...prev, [fromShop]: updatedStock }));
-      
+
       toast.success("Stock updated successfully!");
     } catch (error) {
       console.error("Transfer error:", error);
@@ -294,95 +308,15 @@ const ShopTransfer: React.FC = () => {
   };
 
   /* ----------------------------------------------------
-     Generate Challan Window
+     Generate Challan - Use Dedicated Print Route
   ---------------------------------------------------- */
   const openChallanWindow = (log: ShopTransferLog) => {
-    const win = window.open("", "_blank", "noopener,noreferrer");
-    if (!win) {
-      toast.error("Please allow popups!");
-      return;
-    }
-
-    const d = new Date(log.date);
-
-    const html = `
-      <html><head>
-      <title>${log.transferNo}</title>
-      <style>
-        body { font-family: Arial; padding:20px; }
-        table { width:100%; border-collapse:collapse; margin-top:10px; }
-        th,td { border:1px solid #555; padding:6px; font-size:14px; }
-        .sign { height:60px; border-bottom:1px solid #000; width:200px; }
-      </style>
-      </head>
-      <body>
-      <h2>Transfer Challan</h2>
-      <div><b>Transfer No:</b> ${log.transferNo}</div>
-      <div><b>Date:</b> ${d.toLocaleString()}</div>
-      <div><b>From:</b> ${log.fromShop}</div>
-      <div><b>To:</b> ${log.toShop}</div>
-      <br>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Sr</th>
-            <th>Label</th>
-            <th>Barcode</th>
-            <th>Category</th>
-            <th>Location</th>
-            <th>Type</th>
-            <th>Weight (g)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${log.rows
-            .map(
-              (r: ShopTransferRow, i: number) => `
-            <tr>
-              <td>${i + 1}</td>
-              <td>${r.label}</td>
-              <td>${r.barcode || "-"}</td>
-              <td>${r.category || "-"}</td>
-              <td>${r.location || "-"}</td>
-              <td>${r.type || "-"}</td>
-              <td>${r.weight || "-"}</td>
-            </tr>`
-            )
-            .join("")}
-          <tr>
-            <td colspan="6" style="text-align:right"><b>Total Items</b></td>
-            <td>${log.totals.totalQty}</td>
-          </tr>
-          <tr>
-            <td colspan="6" style="text-align:right"><b>Total Weight</b></td>
-            <td>${log.totals.totalWeight} gms</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <br>
-      <div><b>Remarks:</b> ${log.remarks || "-"}</div>
-      ${
-        log.missingLabels && log.missingLabels.length > 0
-          ? `<br><div style="color:red"><b>⚠️ Missing Items:</b> ${log.missingLabels.join(", ")}</div>`
-          : ""
-      }
-
-      <br><br>
-      <table width="100%">
-        <tr>
-          <td><div class="sign"></div>Sender Signature</td>
-          <td><div class="sign"></div>Receiver Signature</td>
-        </tr>
-      </table>
-
-      <script>window.print();</script>
-      </body></html>
-    `;
-
-    win.document.write(html);
-    win.document.close();
+    // Save challan data to localStorage
+    localStorage.setItem("print_challan", JSON.stringify(log));
+    
+    // Open print page in new tab
+    const printUrl = window.location.origin + "/print-challan";
+    window.open(printUrl, "_blank");
   };
 
   /* ----------------------------------------------------
@@ -466,37 +400,25 @@ const ShopTransfer: React.FC = () => {
                 <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
                   From Shop *
                 </label>
-                <select
-                  className={inputStyle}
-                  value={fromShop}
-                  onChange={(e) => setFromShop(e.target.value)}
-                >
-                  <option value="">Select Source Shop</option>
-                  {DEFAULT_SHOPS.map((s) => (
-                    <option key={s} value={s}>
-                      {s} ({branchStock[s]?.length || 0} items)
-                    </option>
-                  ))}
-                </select>
+                <CustomDropdown
+                  options={DEFAULT_SHOPS.map(s => `${s} (${branchStock[s]?.length || 0} items)`)}
+                  value={fromShop ? `${fromShop} (${branchStock[fromShop]?.length || 0} items)` : ""}
+                  onChange={(val) => setFromShop(val.split(' (')[0])}
+                  placeholder="Select Source Shop"
+                />
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
                   To Shop *
                 </label>
-                <select
-                  className={inputStyle}
-                  value={toShop}
-                  onChange={(e) => setToShop(e.target.value)}
+                <CustomDropdown
+                  options={DEFAULT_SHOPS.filter(s => s !== fromShop).map(s => `${s} (${branchStock[s]?.length || 0} items)`)}
+                  value={toShop ? `${toShop} (${branchStock[toShop]?.length || 0} items)` : ""}
+                  onChange={(val) => setToShop(val.split(' (')[0])}
+                  placeholder="Select Destination Shop"
                   disabled={!fromShop}
-                >
-                  <option value="">Select Destination Shop</option>
-                  {DEFAULT_SHOPS.filter(s => s !== fromShop).map((s) => (
-                    <option key={s} value={s}>
-                      {s} ({branchStock[s]?.length || 0} items)
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               <div>
@@ -512,12 +434,71 @@ const ShopTransfer: React.FC = () => {
               </div>
             </div>
 
-            {/* Barcode Scanner */}
+            {/* Barcode Scanner Mode Section */}
             {fromShop && (
-              <div className="mb-6">
-                <BarcodeScanner
-                  onScan={handleBarcodeScan}
-                />
+              <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
+                    <Scan size={18} />
+                    🔍 Barcode Scanner Mode
+                  </label>
+                  <button
+                    onClick={() => setScannerEnabled(!scannerEnabled)}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      scannerEnabled
+                        ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                        : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                    }`}
+                  >
+                    {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
+                  </button>
+                </div>
+                
+                {scannerEnabled && (
+                  <div className="space-y-3">
+                    <BarcodeScanner
+                      onScan={handleBarcodeScan}
+                    />
+                    
+                    {/* Scanned Queue Display */}
+                    {scannedQueue.length > 0 && (
+                      <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            📋 Recently Scanned ({scannedQueue.length})
+                          </h4>
+                          <button
+                            onClick={clearScannedQueue}
+                            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {scannedQueue.map((item, index) => (
+                            <div
+                              key={`${item.barcode}-${index}`}
+                              className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded"
+                            >
+                              <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                {item.barcode}
+                              </span>
+                              <span className="text-gray-600 dark:text-gray-400">
+                                {item.category}
+                              </span>
+                              <span className="text-green-600 dark:text-green-400">✓</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
+                      💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items to transfer queue. 
+                      Each scan adds the item with all details from source shop stock.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -554,11 +535,10 @@ const ShopTransfer: React.FC = () => {
                   {foundItems.map((item, i) => (
                     <div
                       key={i}
-                      className={`p-3 cursor-pointer rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors ${
-                        selectedFoundItem?.label === item.label
+                      className={`p-3 cursor-pointer rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors ${selectedFoundItem?.label === item.label
                           ? "ring-2 ring-primary bg-primary/10"
                           : ""
-                      }`}
+                        }`}
                       onClick={() => setSelectedFoundItem(item)}
                     >
                       <div className="flex items-center justify-between">
