@@ -30,15 +30,14 @@ const shops: ShopConfig[] = [
 ];
 
 const BranchStock: React.FC = () => {
-  const { setBranchStockCache } = useShop();
+  const { setBranchStockCache, branchStockCache } = useShop();
 
-  const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [selectedBranch, setSelectedBranch] = useState<string>(shops[0].code);
   const [data, setData] = useState<BranchStockItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
-  const [branchStockCounts, setBranchStockCounts] = useState<Record<string, number>>({});
   const [showExportModal, setShowExportModal] = useState(false);
 
   // Export ALL branches to Excel
@@ -82,9 +81,10 @@ const BranchStock: React.FC = () => {
           .sort()
           .flatMap((categoryName) => {
             const categoryItems = itemsByCategory[categoryName].sort((a, b) => {
-              const dateA = new Date(a.transferredAt || a.createdAt || 0).getTime();
-              const dateB = new Date(b.transferredAt || b.createdAt || 0).getTime();
-              return dateA - dateB;
+              // Sort by product name alphabetically
+              const nameA = (a.productName || a.remark || "").toLowerCase();
+              const nameB = (b.productName || b.remark || "").toLowerCase();
+              return nameA.localeCompare(nameB);
             });
 
             // Reset serial to 1 for each category
@@ -140,6 +140,155 @@ const BranchStock: React.FC = () => {
     }
   };
 
+  // Export Stock Available (Categorized) - Alphabetically ordered
+  const exportStockAvailableCategorized = () => {
+    const availableItems = data.filter(item => item.status === "in-branch" || !item.status);
+
+    if (availableItems.length === 0) {
+      toast.error("No available stock to export");
+      return;
+    }
+
+    // Group items by category
+    const itemsByCategory: Record<string, typeof availableItems> = {};
+    availableItems.forEach(item => {
+      const cat = item.category || "Uncategorized";
+      if (!itemsByCategory[cat]) itemsByCategory[cat] = [];
+      itemsByCategory[cat].push(item);
+    });
+
+    // Prepare data with category-wise serial numbering - Alphabetically ordered
+    const exportData = Object.keys(itemsByCategory)
+      .sort() // Alphabetical order
+      .flatMap((categoryName) => {
+        const categoryItems = itemsByCategory[categoryName].sort((a, b) => {
+          // Sort by product name alphabetically
+          const nameA = (a.productName || a.remark || "").toLowerCase();
+          const nameB = (b.productName || b.remark || "").toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+
+        let categorySerial = 1;
+
+        return categoryItems.map((item) => ({
+          "Sr No": categorySerial++,
+          "Barcode": item.barcode,
+          "Name": item.productName || item.remark || "-",
+          "Design": item.subcategory || item.design || "-",
+          "Type": item.costPriceType || item.type || "-",
+          "Location": item.location || "-",
+          "Category": item.category || "-",
+          "Status": item.status || "in-branch",
+          "Received At": item.transferredAt
+            ? new Date(item.transferredAt).toLocaleString()
+            : item.createdAt
+              ? new Date(item.createdAt).toLocaleString()
+              : "-",
+        }));
+      });
+
+    // Create workbook
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet['!cols'] = [
+      { wch: 8 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
+      { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 20 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Available Stock");
+
+    // Add summary sheet
+    const summaryData = [
+      { Field: "Report Type", Value: "Available Stock Report (Categorized)" },
+      { Field: "Branch", Value: selectedBranch },
+      { Field: "Total Available Items", Value: availableItems.length },
+      { Field: "Categories", Value: Object.keys(itemsByCategory).length },
+      { Field: "Generated On", Value: new Date().toLocaleString() },
+    ];
+    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+    // Download
+    XLSX.writeFile(workbook, `AvailableStock_${selectedBranch}_${Date.now()}.xlsx`);
+    toast.success("Available stock report downloaded!");
+    setShowExportModal(false);
+  };
+
+  // Export Sold Items - Alphabetically ordered
+  const exportSoldItems = () => {
+    const soldItems = data.filter(item => item.status === "sold");
+
+    if (soldItems.length === 0) {
+      toast.error("No sold items to export");
+      return;
+    }
+
+    // Group items by category
+    const itemsByCategory: Record<string, typeof soldItems> = {};
+    soldItems.forEach(item => {
+      const cat = item.category || "Uncategorized";
+      if (!itemsByCategory[cat]) itemsByCategory[cat] = [];
+      itemsByCategory[cat].push(item);
+    });
+
+    // Prepare data with category-wise serial numbering - Alphabetically ordered
+    const exportData = Object.keys(itemsByCategory)
+      .sort() // Alphabetical order
+      .flatMap((categoryName) => {
+        const categoryItems = itemsByCategory[categoryName].sort((a, b) => {
+          // Sort by product name alphabetically
+          const nameA = (a.productName || a.remark || "").toLowerCase();
+          const nameB = (b.productName || b.remark || "").toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+
+        let categorySerial = 1;
+
+        return categoryItems.map((item) => ({
+          "Sr No": categorySerial++,
+          "Barcode": item.barcode,
+          "Name": item.productName || item.remark || "-",
+          "Design": item.subcategory || item.design || "-",
+          "Type": item.costPriceType || item.type || "-",
+          "Location": item.location || "-",
+          "Category": item.category || "-",
+          "Status": "Sold",
+          "Received At": item.transferredAt
+            ? new Date(item.transferredAt).toLocaleString()
+            : item.createdAt
+              ? new Date(item.createdAt).toLocaleString()
+              : "-",
+          "Sold At": item.soldAt ? new Date(item.soldAt).toLocaleString() : "-",
+        }));
+      });
+
+    // Create workbook
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet['!cols'] = [
+      { wch: 8 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
+      { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 20 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sold Items");
+
+    // Add summary sheet
+    const summaryData = [
+      { Field: "Report Type", Value: "Sold Items Report (Categorized)" },
+      { Field: "Branch", Value: selectedBranch },
+      { Field: "Total Sold Items", Value: soldItems.length },
+      { Field: "Categories", Value: Object.keys(itemsByCategory).length },
+      { Field: "Generated On", Value: new Date().toLocaleString() },
+    ];
+    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+    // Download
+    XLSX.writeFile(workbook, `SoldItems_${selectedBranch}_${Date.now()}.xlsx`);
+    toast.success("Sold items report downloaded!");
+    setShowExportModal(false);
+  };
+
   // Export to Excel
   const exportToExcel = () => {
     if (data.length === 0) {
@@ -152,9 +301,10 @@ const BranchStock: React.FC = () => {
       .sort()
       .flatMap((categoryName) => {
         const categoryItems = itemsByCategory[categoryName].sort((a, b) => {
-          const dateA = new Date(a.transferredAt || a.createdAt || 0).getTime();
-          const dateB = new Date(b.transferredAt || b.createdAt || 0).getTime();
-          return dateA - dateB;
+          // Sort by product name alphabetically
+          const nameA = (a.productName || a.remark || "").toLowerCase();
+          const nameB = (b.productName || b.remark || "").toLowerCase();
+          return nameA.localeCompare(nameB);
         });
 
         // Reset serial to 1 for each category
@@ -212,46 +362,20 @@ const BranchStock: React.FC = () => {
     setShowExportModal(false);
   };
 
-  // Load stock counts for all branches and auto-select best branch
-  const loadAllBranchCounts = async () => {
-    try {
-      const counts: Record<string, number> = {};
-
-      // Load stock count for each branch
-      for (const shop of shops) {
-        const items = await getShopStock(shop.code);
-        counts[shop.code] = items.length;
-      }
-
-      setBranchStockCounts(counts);
-
-      // Auto-select branch with most stock (or first branch with stock)
-      const branchesWithStock = Object.entries(counts)
-        .filter(([, count]) => count > 0)
-        .sort(([, a], [, b]) => b - a); // Sort by count descending
-
-      if (branchesWithStock.length > 0) {
-        setSelectedBranch(branchesWithStock[0][0]);
-      } else {
-        // No branches have stock, default to first branch
-        setSelectedBranch(shops[0].code);
-      }
-    } catch (error) {
-      console.error("Error loading branch counts:", error);
-      setSelectedBranch(shops[0].code);
-    }
-  };
-
-  // Initial load
-  useEffect(() => {
-    loadAllBranchCounts();
-  }, []);
+  // No initial loading of all branches - just load selected branch on demand
 
   // Load branch stock from shop's stockItems subcollection
-  const loadBranchStock = async () => {
+  const loadBranchStock = async (forceRefresh = false) => {
     if (!selectedBranch) return;
 
-    // DON'T use cache for Branch Stock - always load fresh to show sold items
+    const branchKey = selectedBranch as "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
+
+    // Use cache if available and not forcing refresh
+    if (!forceRefresh && branchKey && branchStockCache[branchKey]?.length > 0) {
+      setData(branchStockCache[branchKey]);
+      return;
+    }
+
     setLoading(true);
     try {
       // Get items from shop's stockItems subcollection
@@ -259,17 +383,12 @@ const BranchStock: React.FC = () => {
       setData(items);
 
       // Update cache for other pages (like Billing)
-      const branchKey = selectedBranch as "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
       if (branchKey) {
         setBranchStockCache(branchKey, items);
       }
 
       if (items.length === 0) {
         toast("No items found for this branch", { icon: "ℹ️" });
-      } else {
-        const availableCount = items.filter(i => i.status === "in-branch" || !i.status).length;
-        const soldCount = items.filter(i => i.status === "sold").length;
-        toast.success(`Loaded ${items.length} items (${availableCount} available, ${soldCount} sold)`);
       }
     } catch (err) {
       console.error(err);
@@ -279,12 +398,19 @@ const BranchStock: React.FC = () => {
     }
   };
 
+  // Load stock only once on mount (use cache if available)
+  useEffect(() => {
+    loadBranchStock(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reload when branch changes (use cache if available)
   useEffect(() => {
     if (selectedBranch) {
-      loadBranchStock();
+      loadBranchStock(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranch]); // Only re-run when branch changes
+  }, [selectedBranch]);
 
   // Group items by category
   const itemsByCategory = useMemo(() => {
@@ -462,31 +588,29 @@ const BranchStock: React.FC = () => {
 
             {/* Branch Selector & Stats */}
             <div className="mb-6 space-y-4 no-print">
-              {/* Branch Selection */}
+              {/* Branch Selection with Refresh */}
               <div className="bg-blue-50 dark:bg-blue-500/10 border-2 border-blue-200 dark:border-blue-800/50 rounded-xl p-4">
-                <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  🏢 Select Branch
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-semibold text-blue-800 dark:text-blue-400">
+                    🏢 Select Branch
+                  </label>
+                  <button
+                    onClick={() => loadBranchStock(true)}
+                    disabled={loading}
+                    className="px-3 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-white dark:bg-white/10 rounded-lg border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-white/20 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? "Refreshing..." : "🔄 Refresh"}
+                  </button>
+                </div>
                 <CustomDropdown
-                  options={shops.map((shop) => {
-                    const count = branchStockCounts[shop.code] || 0;
-                    return `${shop.name} ${count > 0 ? `(${count} items)` : "(Empty)"}`;
-                  })}
-                  value={selectedBranch ? `${shops.find(s => s.code === selectedBranch)?.name || selectedBranch} ${branchStockCounts[selectedBranch] > 0 ? `(${branchStockCounts[selectedBranch]} items)` : "(Empty)"}` : ""}
+                  options={shops.map((shop) => shop.name)}
+                  value={shops.find(s => s.code === selectedBranch)?.name || ""}
                   onChange={(val) => {
-                    // Extract branch code from the selected value
-                    const branchName = val.split(' (')[0];
-                    const shop = shops.find(s => s.name === branchName);
+                    const shop = shops.find(s => s.name === val);
                     if (shop) setSelectedBranch(shop.code);
                   }}
                   placeholder="Select Branch"
-                  disabled={!selectedBranch}
                 />
-                {Object.keys(branchStockCounts).length > 0 && (
-                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                    💡 Auto-selected branch with most stock
-                  </p>
-                )}
               </div>
 
               {/* Summary Dashboard */}
@@ -832,27 +956,67 @@ const BranchStock: React.FC = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setShowExportModal(false)}
-                className="px-6 py-2.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-xl font-medium transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={exportAllBranches}
-                className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
-              >
-                <Package size={18} />
-                All Branches
-              </button>
-              <button
-                onClick={exportToExcel}
-                className="px-6 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
-              >
-                <Download size={18} />
-                This Branch
-              </button>
+            <div className="p-6 border-t border-gray-200 dark:border-gray-700 space-y-4">
+              {/* Current Branch Reports */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                  📍 Current Branch Reports ({selectedBranch})
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={exportToExcel}
+                    className="px-4 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2 text-sm"
+                  >
+                    <Download size={16} />
+                    All Items
+                  </button>
+                  <button
+                    onClick={exportStockAvailableCategorized}
+                    className="px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2 text-sm"
+                    disabled={data.filter(item => item.status === "in-branch" || !item.status).length === 0}
+                  >
+                    <Package size={16} />
+                    Available Stock (Categorized)
+                  </button>
+                  <button
+                    onClick={exportSoldItems}
+                    className="px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2 text-sm"
+                    disabled={data.filter(item => item.status === "sold").length === 0}
+                  >
+                    <span className="text-lg">✅</span>
+                    Sold Items
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  💡 All reports are categorized and sorted alphabetically
+                </p>
+              </div>
+
+              {/* All Branches Report */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                  🏢 Multi-Branch Report
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={exportAllBranches}
+                    className="px-4 py-2.5 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2 text-sm"
+                  >
+                    <Package size={16} />
+                    All Branches Combined
+                  </button>
+                </div>
+              </div>
+
+              {/* Cancel Button */}
+              <div className="flex justify-end pt-3 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="px-6 py-2.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>

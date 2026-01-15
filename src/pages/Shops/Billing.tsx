@@ -16,9 +16,9 @@ import autoTable from "jspdf-autotable";
 import { useShop } from "../../context/ShopContext";
 import { createSaleLedgerEntry } from "../../firebase/ledger";
 import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
-import { 
-  createSalesReturnBill, 
-  updateInvoiceWithReturn, 
+import {
+  createSalesReturnBill,
+  updateInvoiceWithReturn,
   updateStockAfterReturn,
   calculateReturnAmounts,
   generateReturnId,
@@ -29,6 +29,8 @@ import {
 
 import { numberToWords } from "../../utils/numberToWords";
 import { createPrintHTML, printDocument } from "../../utils/printUtils";
+import CustomDropdown from "../../components/common/CustomDropdown";
+import { getAllActiveSalespersons, addSalesperson, deleteSalesperson, Salesperson } from "../../firebase/salespersons";
 
 type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
@@ -76,13 +78,16 @@ export default function Billing() {
   const [showPreview, setShowPreview] = useState(false);
   const [savedInvoiceData, setSavedInvoiceData] = useState<any>(null);
 
+  // Dynamic Salespersons State - managed locally like branches in Distribution
+  const [salespersons, setSalespersons] = useState<string[]>([]);
+
   // Barcode scanner mode state
   const [scannerEnabled, setScannerEnabled] = useState(false);
   const [scannedQueue, setScannedQueue] = useState<BillItem[]>([]);
 
   // Bill Mode: 'new-bill' or 'return-bill'
   const [billMode, setBillMode] = useState<'new-bill' | 'return-bill'>('new-bill');
-  
+
   // Return Bill States
   const [searchInvoiceId, setSearchInvoiceId] = useState("");
   const [searchPhone, setSearchPhone] = useState("");
@@ -106,6 +111,7 @@ export default function Billing() {
   useEffect(() => {
     loadGSTSettings();
     loadCompanySettings();
+    loadSalespersons();
     restoreExchangeSession();
   }, []);
 
@@ -119,7 +125,7 @@ export default function Billing() {
         const savedTime = new Date(data.timestamp).getTime();
         const now = new Date().getTime();
         const hoursDiff = (now - savedTime) / (1000 * 60 * 60);
-        
+
         if (hoursDiff < 24 && data.branch === selectedBranch) {
           setAvailableCredit(data.credit);
           setCustomerName(data.customerName || '');
@@ -202,6 +208,62 @@ export default function Billing() {
       setCompanySettings(settings);
     } catch (error) {
       console.error("Error loading company settings:", error);
+    }
+  };
+
+  // Load salespersons from Firebase - filtered by current branch
+  const loadSalespersons = async () => {
+    try {
+      const allSp = await getAllActiveSalespersons();
+      // Filter by current branch
+      const branchSp = allSp.filter(sp => sp.primaryBranch === selectedBranch);
+      setSalespersons(branchSp.map(s => s.name).sort());
+    } catch (error) {
+      console.error("Error loading salespersons:", error);
+      setSalespersons([]);
+    }
+  };
+
+  // Reload salespersons when branch changes
+  useEffect(() => {
+    loadSalespersons();
+  }, [selectedBranch]);
+
+  // Handler for adding new salesperson
+  const handleAddSalesperson = async (name: string) => {
+    if (!salespersons.includes(name)) {
+      // Add to local state immediately
+      setSalespersons(prev => [...prev, name].sort());
+      setSalespersonName(name);
+      toast.success(`Added salesperson: ${name}`);
+
+      // Save to Firebase in background
+      try {
+        await addSalesperson(name, selectedBranch);
+      } catch (error) {
+        console.error("Error saving salesperson to Firebase:", error);
+      }
+    }
+  };
+
+  // Handler for deleting salesperson
+  const handleDeleteSalesperson = async (name: string) => {
+    // Remove from local state immediately
+    setSalespersons(prev => prev.filter(sp => sp !== name));
+    if (salespersonName === name) {
+      setSalespersonName("");
+    }
+    toast.success(`Deleted salesperson: ${name}`);
+
+    // Delete from Firebase in background
+    try {
+      const allSp = await getAllActiveSalespersons();
+      const spToDelete = allSp.find(sp => sp.name === name && sp.primaryBranch === selectedBranch);
+      if (spToDelete) {
+        await deleteSalesperson(spToDelete.id, name);
+      }
+    } catch (error) {
+      console.error("Error deleting salesperson from Firebase:", error);
     }
   };
 
@@ -320,17 +382,17 @@ export default function Billing() {
       // Calculate taxable amount
       const calculated = calculateItemTaxable(newItem);
       setBillItems((prev) => [...prev, calculated]);
-      
+
       // Add to scanned queue for visual feedback
       setScannedQueue((prev) => [calculated, ...prev].slice(0, 10)); // Keep last 10
-      
+
       toast.success(`✅ Added: ${stockItem.category} (${trimmedBarcode})`);
     } catch (error) {
       console.error("Error scanning barcode:", error);
       toast.error("Failed to process barcode");
     }
   };
-  
+
   // Clear scanned queue
   const clearScannedQueue = () => {
     setScannedQueue([]);
@@ -346,12 +408,12 @@ export default function Billing() {
       const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
       const q = query(invoicesRef, orderBy("createdAt", "desc"), limit(20));
       const snapshot = await getDocs(q);
-      
+
       const invoices = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
-      
+
       setRecentInvoices(invoices);
     } catch (error) {
       console.error("Error loading recent invoices:", error);
@@ -370,12 +432,12 @@ export default function Billing() {
     try {
       const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
       let q;
-      
+
       if (searchInvoiceId.trim()) {
         // Search by invoice ID
         const invoiceDocRef = doc(db, "shops", selectedBranch, "invoices", searchInvoiceId.trim());
         const snapshot = await getDoc(invoiceDocRef);
-        
+
         if (snapshot.exists()) {
           setOriginalInvoice({ id: snapshot.id, ...snapshot.data() });
           setSelectedReturnItems(new Set());
@@ -394,7 +456,7 @@ export default function Billing() {
           limit(10)
         );
         const snapshot = await getDocs(q);
-        
+
         if (!snapshot.empty) {
           const invoices = snapshot.docs.map((doc) => ({
             id: doc.id,
@@ -559,14 +621,14 @@ export default function Billing() {
         const creditAmount = calc.totalCreditAmount;
         const custName = originalInvoice.customerName || "";
         const custPhone = originalInvoice.customerPhone || "";
-        
+
         setAvailableCredit(creditAmount);
         setCustomerName(custName);
         setCustomerPhone(custPhone);
-        
+
         // Save to sessionStorage for persistence across navigation
         saveExchangeSession(creditAmount, custName, custPhone);
-        
+
         setBillMode("new-bill");
         setOriginalInvoice(null);
         setSelectedReturnItems(new Set());
@@ -797,7 +859,7 @@ export default function Billing() {
 
       // Show preview modal
       setShowPreview(true);
-      
+
       // Clear exchange session after successful invoice save
       if (availableCredit > 0) {
         clearExchangeSession();
@@ -813,10 +875,10 @@ export default function Billing() {
   // Handle print from preview
   const handlePrintInvoice = () => {
     setShowPreview(false);
-    
+
     // Generate invoice ID
     const invoiceId = `INV-${Date.now().toString().slice(-8)}`;
-    
+
     // Create printable HTML
     const printHTML = createPrintHTML({
       title: `Invoice ${invoiceId}`,
@@ -1052,7 +1114,7 @@ export default function Billing() {
         </div>
       `
     });
-    
+
     // Print the document
     printDocument(printHTML);
 
@@ -1272,14 +1334,17 @@ export default function Billing() {
 
               <div>
                 <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                  Salesperson Name *
+                  Salesperson *
                 </label>
-                <input
-                  type="text"
+                <CustomDropdown
+                  options={salespersons}
                   value={salespersonName}
-                  onChange={(e) => setSalespersonName(e.target.value)}
-                  placeholder="Enter salesperson name"
-                  className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
+                  onChange={(val) => setSalespersonName(val)}
+                  onAddNew={handleAddSalesperson}
+                  onDelete={handleDeleteSalesperson}
+                  placeholder="Select salesperson"
+                  addNewPlaceholder="Add salesperson..."
+                  allowDelete={true}
                 />
               </div>
             </div>
@@ -1296,11 +1361,10 @@ export default function Billing() {
                     cancelReturn();
                   }
                 }}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${
-                  billMode === 'return-bill'
-                    ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                    : 'bg-blue-500 hover:bg-blue-600 text-white'
-                }`}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${billMode === 'return-bill'
+                  ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                  : 'bg-blue-500 hover:bg-blue-600 text-white'
+                  }`}
               >
                 {billMode === 'return-bill' ? (
                   <>
@@ -1323,7 +1387,7 @@ export default function Billing() {
                   </button>
                 </>
               )}
-              
+
               <button
                 onClick={exportToExcel}
                 className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
@@ -1406,248 +1470,247 @@ export default function Billing() {
                 )}
 
                 {/* Barcode Scanner Mode Section */}
-            <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
-                  <Scan size={18} />
-                  🔍 Barcode Scanner Mode
-                </label>
-                <button
-                  onClick={() => setScannerEnabled(!scannerEnabled)}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    scannerEnabled
-                      ? "bg-indigo-500 text-white hover:bg-indigo-600"
-                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
-                  }`}
-                >
-                  {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
-                </button>
-              </div>
-              
-              {scannerEnabled && (
-                <div className="space-y-3">
-                  <BarcodeScanner
-                    onScan={handleBarcodeScan}
-                    placeholder="Scan barcode to add item to bill..."
-                    disabled={loading}
-                  />
-                  
-                  {/* Scanned Queue Display */}
-                  {scannedQueue.length > 0 && (
-                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          📋 Recently Scanned ({scannedQueue.length})
-                        </h4>
-                        <button
-                          onClick={clearScannedQueue}
-                          className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                      <div className="space-y-1 max-h-32 overflow-y-auto">
-                        {scannedQueue.map((item, index) => (
-                          <div
-                            key={`${item.id}-${index}`}
-                            className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded"
-                          >
-                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                              {item.barcode}
-                            </span>
-                            <span className="text-gray-600 dark:text-gray-400">
-                              {item.category}
-                            </span>
-                            <span className="text-green-600 dark:text-green-400">✓</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
-                    💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items to bill. 
-                    Each scan adds the item with default price (editable below).
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Bill Items Table */}
-            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 mb-6">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-white/5">
-                  <tr className="text-left font-semibold text-gray-700 dark:text-gray-300">
-                    <th className="p-3">Sr No</th>
-                    <th className="p-3">Item Name</th>
-                    <th className="p-3">Barcode</th>
-                    <th className="p-3">Loct</th>
-                    <th className="p-3">Pcs</th>
-                    <th className="p-3">Weight</th>
-                    <th className="p-3">Type</th>
-                    <th className="p-3">Rate</th>
-                    <th className="p-3">Discount</th>
-                    <th className="p-3">Taxable Value</th>
-                    <th className="p-3"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {billItems.map((item, idx) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
-                    >
-                      <td className="p-3">{idx + 1}</td>
-                      <td className="p-3 font-medium">{item.category}</td>
-                      <td className="p-3 font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
-                        {item.barcode}
-                      </td>
-                      <td className="p-3 text-gray-500">{item.location}</td>
-                      <td className="p-3">1</td>
-                      <td className="p-3">{item.weight}</td>
-                      <td className="p-3">{item.type}</td>
-                      <td className="p-3">
-                        <input
-                          type="number"
-                          value={item.sellingPrice}
-                          onChange={(e) =>
-                            updateItem(item.id, "sellingPrice", Number(e.target.value))
-                          }
-                          className="w-24 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
-                          min="0"
-                        />
-                      </td>
-                      <td className="p-3">
-                        <input
-                          type="number"
-                          value={item.discount}
-                          onChange={(e) =>
-                            updateItem(item.id, "discount", Number(e.target.value))
-                          }
-                          className="w-20 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
-                          min="0"
-                          max={item.sellingPrice}
-                        />
-                      </td>
-                      <td className="p-3 font-semibold">₹{item.taxableAmount.toFixed(2)}</td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => removeItem(item.id)}
-                          className="p-1 text-red-600 hover:bg-red-50 rounded dark:hover:bg-red-900/20"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-
-                  {billItems.length === 0 && (
-                    <tr>
-                      <td colSpan={11} className="p-8 text-center text-gray-500">
-                        <ShoppingCart size={48} className="mx-auto mb-2 opacity-50" />
-                        <p>No items in bill. Scan barcodes to add items.</p>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Totals */}
-            {billItems.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div></div>
-                <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-6 border border-gray-200 dark:border-gray-800">
-                  {/* GST Type Selector */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
-                      GST Type
+                <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
+                      <Scan size={18} />
+                      🔍 Barcode Scanner Mode
                     </label>
-                    <select
-                      value={gstType}
-                      onChange={(e) => setGstType(e.target.value as "cgst_sgst" | "igst")}
-                      className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                    <button
+                      onClick={() => setScannerEnabled(!scannerEnabled)}
+                      className={`px-4 py-2 rounded-lg font-medium transition-colors ${scannerEnabled
+                        ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                        : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                        }`}
                     >
-                      <option value="cgst_sgst">CGST + SGST (Intra-state)</option>
-                      <option value="igst">IGST (Inter-state)</option>
-                    </select>
+                      {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
+                    </button>
                   </div>
 
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span>Subtotal:</span>
-                      <span className="font-semibold">₹{totals.subtotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-red-600 dark:text-red-400">
-                      <span>Total Discount:</span>
-                      <span className="font-semibold">-₹{totals.totalDiscount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Taxable Amount:</span>
-                      <span className="font-semibold">₹{totals.taxable.toFixed(2)}</span>
-                    </div>
+                  {scannerEnabled && (
+                    <div className="space-y-3">
+                      <BarcodeScanner
+                        onScan={handleBarcodeScan}
+                        placeholder="Scan barcode to add item to bill..."
+                        disabled={loading}
+                      />
 
-                    {gstType === "cgst_sgst" ? (
-                      <>
-                        <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                          <span>CGST ({gstSettings?.cgst || 1.5}%):</span>
-                          <span>₹{totals.cgst.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                          <span>SGST ({gstSettings?.sgst || 1.5}%):</span>
-                          <span>₹{totals.sgst.toFixed(2)}</span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                        <span>IGST ({gstSettings?.igst || 3}%):</span>
-                        <span>₹{totals.igst.toFixed(2)}</span>
-                      </div>
-                    )}
-
-                    <div className="border-t border-gray-300 dark:border-gray-700 pt-2 mt-2">
-                      <div className="flex justify-between text-lg font-bold">
-                        <span>Grand Total:</span>
-                        <span className="text-green-600 dark:text-green-400">
-                          ₹{totals.grandTotal.toFixed(2)}
-                        </span>
-                      </div>
-                      
-                      {/* Show credit adjustment if applicable */}
-                      {availableCredit > 0 && (
-                        <>
-                          <div className="flex justify-between text-md font-semibold text-orange-600 dark:text-orange-400 mt-2">
-                            <span>Return Credit:</span>
-                            <span>-₹{availableCredit.toFixed(2)}</span>
+                      {/* Scanned Queue Display */}
+                      {scannedQueue.length > 0 && (
+                        <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-indigo-200 dark:border-indigo-800">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                              📋 Recently Scanned ({scannedQueue.length})
+                            </h4>
+                            <button
+                              onClick={clearScannedQueue}
+                              className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            >
+                              Clear
+                            </button>
                           </div>
-                          <div className="flex justify-between text-xl font-bold text-blue-600 dark:text-blue-400 mt-2 pt-2 border-t border-gray-300 dark:border-gray-700">
-                            <span>Final Amount:</span>
-                            <span>
-                              ₹{totals.finalAmount.toFixed(2)}
+                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                            {scannedQueue.map((item, index) => (
+                              <div
+                                key={`${item.id}-${index}`}
+                                className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded"
+                              >
+                                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                  {item.barcode}
+                                </span>
+                                <span className="text-gray-600 dark:text-gray-400">
+                                  {item.category}
+                                </span>
+                                <span className="text-green-600 dark:text-green-400">✓</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded p-2">
+                        💡 <strong>Quick Tip:</strong> Scan barcodes to quickly add items to bill.
+                        Each scan adds the item with default price (editable below).
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bill Items Table */}
+                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 mb-6">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-white/5">
+                      <tr className="text-left font-semibold text-gray-700 dark:text-gray-300">
+                        <th className="p-3">Sr No</th>
+                        <th className="p-3">Item Name</th>
+                        <th className="p-3">Barcode</th>
+                        <th className="p-3">Loct</th>
+                        <th className="p-3">Pcs</th>
+                        <th className="p-3">Weight</th>
+                        <th className="p-3">Type</th>
+                        <th className="p-3">Rate</th>
+                        <th className="p-3">Discount</th>
+                        <th className="p-3">Taxable Value</th>
+                        <th className="p-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billItems.map((item, idx) => (
+                        <tr
+                          key={item.id}
+                          className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5"
+                        >
+                          <td className="p-3">{idx + 1}</td>
+                          <td className="p-3 font-medium">{item.category}</td>
+                          <td className="p-3 font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                            {item.barcode}
+                          </td>
+                          <td className="p-3 text-gray-500">{item.location}</td>
+                          <td className="p-3">1</td>
+                          <td className="p-3">{item.weight}</td>
+                          <td className="p-3">{item.type}</td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              value={item.sellingPrice}
+                              onChange={(e) =>
+                                updateItem(item.id, "sellingPrice", Number(e.target.value))
+                              }
+                              className="w-24 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                              min="0"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              value={item.discount}
+                              onChange={(e) =>
+                                updateItem(item.id, "discount", Number(e.target.value))
+                              }
+                              className="w-20 px-2 py-1 border rounded dark:bg-gray-800 dark:border-gray-700"
+                              min="0"
+                              max={item.sellingPrice}
+                            />
+                          </td>
+                          <td className="p-3 font-semibold">₹{item.taxableAmount.toFixed(2)}</td>
+                          <td className="p-3">
+                            <button
+                              onClick={() => removeItem(item.id)}
+                              className="p-1 text-red-600 hover:bg-red-50 rounded dark:hover:bg-red-900/20"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {billItems.length === 0 && (
+                        <tr>
+                          <td colSpan={11} className="p-8 text-center text-gray-500">
+                            <ShoppingCart size={48} className="mx-auto mb-2 opacity-50" />
+                            <p>No items in bill. Scan barcodes to add items.</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Totals */}
+                {billItems.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div></div>
+                    <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-6 border border-gray-200 dark:border-gray-800">
+                      {/* GST Type Selector */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium mb-2 text-gray-500 dark:text-gray-400">
+                          GST Type
+                        </label>
+                        <select
+                          value={gstType}
+                          onChange={(e) => setGstType(e.target.value as "cgst_sgst" | "igst")}
+                          className="w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 focus:outline-none focus:border-primary"
+                        >
+                          <option value="cgst_sgst">CGST + SGST (Intra-state)</option>
+                          <option value="igst">IGST (Inter-state)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span>Subtotal:</span>
+                          <span className="font-semibold">₹{totals.subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-red-600 dark:text-red-400">
+                          <span>Total Discount:</span>
+                          <span className="font-semibold">-₹{totals.totalDiscount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Taxable Amount:</span>
+                          <span className="font-semibold">₹{totals.taxable.toFixed(2)}</span>
+                        </div>
+
+                        {gstType === "cgst_sgst" ? (
+                          <>
+                            <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                              <span>CGST ({gstSettings?.cgst || 1.5}%):</span>
+                              <span>₹{totals.cgst.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                              <span>SGST ({gstSettings?.sgst || 1.5}%):</span>
+                              <span>₹{totals.sgst.toFixed(2)}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                            <span>IGST ({gstSettings?.igst || 3}%):</span>
+                            <span>₹{totals.igst.toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        <div className="border-t border-gray-300 dark:border-gray-700 pt-2 mt-2">
+                          <div className="flex justify-between text-lg font-bold">
+                            <span>Grand Total:</span>
+                            <span className="text-green-600 dark:text-green-400">
+                              ₹{totals.grandTotal.toFixed(2)}
                             </span>
                           </div>
-                        </>
-                      )}
+
+                          {/* Show credit adjustment if applicable */}
+                          {availableCredit > 0 && (
+                            <>
+                              <div className="flex justify-between text-md font-semibold text-orange-600 dark:text-orange-400 mt-2">
+                                <span>Return Credit:</span>
+                                <span>-₹{availableCredit.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-xl font-bold text-blue-600 dark:text-blue-400 mt-2 pt-2 border-t border-gray-300 dark:border-gray-700">
+                                <span>Final Amount:</span>
+                                <span>
+                                  ₹{totals.finalAmount.toFixed(2)}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleSaveInvoice}
+                        className="w-full mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={billItems.length === 0 || !customerName.trim() || !salespersonName.trim()}
+                        type="button"
+                      >
+                        {billItems.length === 0
+                          ? "Add items to bill"
+                          : !customerName.trim()
+                            ? "Enter customer name"
+                            : !salespersonName.trim()
+                              ? "Enter salesperson name"
+                              : "Save Invoice & Complete Sale"}
+                      </button>
                     </div>
                   </div>
-
-                  <button
-                    onClick={handleSaveInvoice}
-                    className="w-full mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={billItems.length === 0 || !customerName.trim() || !salespersonName.trim()}
-                    type="button"
-                  >
-                    {billItems.length === 0
-                      ? "Add items to bill"
-                      : !customerName.trim()
-                        ? "Enter customer name"
-                        : !salespersonName.trim()
-                          ? "Enter salesperson name"
-                          : "Save Invoice & Complete Sale"}
-                  </button>
-                </div>
-              </div>
-            )}
+                )}
               </>
             )}
 
@@ -1663,7 +1726,7 @@ export default function Billing() {
                       <h3 className="text-xl font-bold text-orange-900 dark:text-orange-300 mb-4">
                         🔍 Search Invoice for Return
                       </h3>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                           <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
@@ -1677,7 +1740,7 @@ export default function Billing() {
                             className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:outline-none focus:border-primary"
                           />
                         </div>
-                        
+
                         <div>
                           <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
                             Customer Phone
@@ -1691,7 +1754,7 @@ export default function Billing() {
                           />
                         </div>
                       </div>
-                      
+
                       <button
                         onClick={searchInvoice}
                         disabled={searchingInvoice}
@@ -1785,7 +1848,7 @@ export default function Billing() {
                       <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
                         Select Items to Return
                       </h4>
-                      
+
                       <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
                         <table className="w-full text-sm">
                           <thead className="bg-gray-100 dark:bg-gray-700">
@@ -1818,11 +1881,10 @@ export default function Billing() {
                             {originalInvoice.items?.map((item: any, idx: number) => (
                               <tr
                                 key={idx}
-                                className={`border-b border-gray-200 dark:border-gray-700 ${
-                                  selectedReturnItems.has(item.barcode)
-                                    ? 'bg-orange-50 dark:bg-orange-900/20'
-                                    : ''
-                                }`}
+                                className={`border-b border-gray-200 dark:border-gray-700 ${selectedReturnItems.has(item.barcode)
+                                  ? 'bg-orange-50 dark:bg-orange-900/20'
+                                  : ''
+                                  }`}
                               >
                                 <td className="p-3">
                                   <input
@@ -1881,7 +1943,7 @@ export default function Billing() {
                         <h4 className="text-lg font-bold text-green-900 dark:text-green-300 mb-4">
                           💰 Return Calculation
                         </h4>
-                        
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="space-y-2">
                             <div className="flex justify-between text-sm">
@@ -1920,7 +1982,7 @@ export default function Billing() {
                               </div>
                             </div>
                           </div>
-                          
+
                           <div>
                             <label className="block text-sm font-medium mb-2">
                               Settlement Mode *
@@ -1929,11 +1991,10 @@ export default function Billing() {
                               {(['exchange', 'refund', 'store-credit'] as const).map((mode) => (
                                 <label
                                   key={mode}
-                                  className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${
-                                    settlementMode === mode
-                                      ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                                      : 'border-gray-200 dark:border-gray-700 hover:border-green-300'
-                                  }`}
+                                  className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${settlementMode === mode
+                                    ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-green-300'
+                                    }`}
                                 >
                                   <input
                                     type="radio"
@@ -1958,7 +2019,7 @@ export default function Billing() {
                             </div>
                           </div>
                         </div>
-                        
+
                         <div className="mt-6 flex gap-4">
                           <button
                             onClick={processReturnBill}
@@ -1973,7 +2034,7 @@ export default function Billing() {
                               <>Process Return</>
                             )}
                           </button>
-                          
+
                           <button
                             onClick={cancelReturn}
                             className="px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-semibold transition-colors"

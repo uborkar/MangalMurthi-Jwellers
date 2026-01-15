@@ -15,6 +15,23 @@ import {
 export default function CADashboard() {
   const reportCategories = [
     {
+      title: "GST Reports",
+      icon: FileText,
+      color: "purple",
+      reports: [
+        {
+          name: "GSTR-1 Return Filing",
+          description: "Complete outward supplies return - B2B, B2CL, B2CS, HSN Summary",
+          path: "/ca/gstr1-report",
+        },
+        {
+          name: "Branch-Wise Bill Report",
+          description: "Branch-wise sales summary with complete GST breakdown",
+          path: "/ca/branch-wise-bills",
+        },
+      ],
+    },
+    {
       title: "Purchase Reports",
       icon: ShoppingCart,
       color: "blue",
@@ -97,9 +114,8 @@ export default function CADashboard() {
                   >
                     {/* Category Header */}
                     <div
-                      className={`p-4 bg-gradient-to-r ${
-                        colorClasses[category.color as keyof typeof colorClasses]
-                      } text-white`}
+                      className={`p-4 bg-gradient-to-r ${colorClasses[category.color as keyof typeof colorClasses]
+                        } text-white`}
                     >
                       <div className="flex items-center gap-3">
                         <Icon size={24} />
@@ -139,6 +155,17 @@ export default function CADashboard() {
 
             {/* Quick Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+              <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20">
+                <div className="flex items-center justify-between mb-2">
+                  <FileText className="text-purple-600 dark:text-purple-400" size={24} />
+                  <span className="text-xs text-purple-600 dark:text-purple-400 font-semibold">
+                    GST REPORTS
+                  </span>
+                </div>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">2</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Filing Reports</p>
+              </div>
+
               <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20">
                 <div className="flex items-center justify-between mb-2">
                   <Package className="text-blue-600 dark:text-blue-400" size={24} />
@@ -146,7 +173,7 @@ export default function CADashboard() {
                     PURCHASES
                   </span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">4</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">2</p>
                 <p className="text-xs text-gray-600 dark:text-gray-400">Report Types</p>
               </div>
 
@@ -157,30 +184,19 @@ export default function CADashboard() {
                     SALES
                   </span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">4</p>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Report Types</p>
-              </div>
-
-              <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20">
-                <div className="flex items-center justify-between mb-2">
-                  <Users className="text-purple-600 dark:text-purple-400" size={24} />
-                  <span className="text-xs text-purple-600 dark:text-purple-400 font-semibold">
-                    PARTIES
-                  </span>
-                </div>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white">2</p>
-                <p className="text-xs text-gray-600 dark:text-gray-400">View Types</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Report Types</p>
               </div>
 
               <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20">
                 <div className="flex items-center justify-between mb-2">
-                  <FileText className="text-orange-600 dark:text-orange-400" size={24} />
+                  <Users className="text-orange-600 dark:text-orange-400" size={24} />
                   <span className="text-xs text-orange-600 dark:text-orange-400 font-semibold">
-                    FORMATS
+                    TOTAL
                   </span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">3</p>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Export Options</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">6</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Available Reports</p>
               </div>
             </div>
 

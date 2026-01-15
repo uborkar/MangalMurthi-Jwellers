@@ -44,6 +44,7 @@ import PurchaseAnnexure2A from "./pages/CA/PurchaseAnnexure2A";
 import SalesAnnexure1A from "./pages/CA/SalesAnnexure1A";
 import SalesAnnexure2A from "./pages/CA/SalesAnnexure2A";
 import GSTR1Report from "./pages/CA/GSTR1Report";
+import BranchWiseBillReport from "./pages/CA/BranchWiseBillReport";
 import AppSettingsPage from "./pages/Settings/AppSettings";
 import { AuthProvider } from "./context/AuthContext";
 import { ShopProvider } from "./context/ShopContext";
@@ -140,6 +141,7 @@ export default function App() {
               <Route path="/ca/sales-annexure-1a" element={<SalesAnnexure1A />} />
               <Route path="/ca/sales-annexure-2a" element={<SalesAnnexure2A />} />
               <Route path="/ca/gstr1-report" element={<GSTR1Report />} />
+              <Route path="/ca/branch-wise-bills" element={<BranchWiseBillReport />} />
 
               {/* Others Page */}
               <Route path="/profile" element={<UserProfiles />} />

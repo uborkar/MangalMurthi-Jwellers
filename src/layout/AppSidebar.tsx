@@ -146,6 +146,10 @@ const navItems: NavItem[] = [
       {
         name: "GSTR-1 Report",
         path: "/ca/gstr1-report",
+      },
+      {
+        name: "Branch-Wise Bills",
+        path: "/ca/branch-wise-bills",
       }
     ]
   }

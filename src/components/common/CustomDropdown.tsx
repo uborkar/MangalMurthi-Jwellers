@@ -1,18 +1,20 @@
-// Custom Dropdown with Add New functionality
+// Custom Dropdown with Add New functionality and Delete icon
 // Matches project theme: rounded-xl borders, proper dark mode, brand colors
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Check, Plus } from "lucide-react";
+import { ChevronDown, Check, Plus, Trash2 } from "lucide-react";
 
 interface CustomDropdownProps {
     options: string[];
     value: string;
     onChange: (value: string) => void;
     onAddNew?: (newValue: string) => void;
+    onDelete?: (value: string) => void;
     placeholder?: string;
     addNewPlaceholder?: string;
     className?: string;
     disabled?: boolean;
+    allowDelete?: boolean;
 }
 
 const CustomDropdown: React.FC<CustomDropdownProps> = ({
@@ -20,10 +22,12 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
     value,
     onChange,
     onAddNew,
+    onDelete,
     placeholder = "Select...",
     addNewPlaceholder = "Add new...",
     className = "",
     disabled = false,
+    allowDelete = false,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [newItemValue, setNewItemValue] = useState("");
@@ -57,6 +61,14 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
             onChange(newItemValue.trim());
             setNewItemValue("");
             setIsOpen(false);
+        }
+    };
+
+    // Handle deleting an item
+    const handleDelete = (e: React.MouseEvent, option: string) => {
+        e.stopPropagation();
+        if (onDelete && window.confirm(`Delete "${option}"?`)) {
+            onDelete(option);
         }
     };
 
@@ -129,26 +141,42 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
                             </div>
                         ) : (
                             options.map((option, index) => (
-                                <button
+                                <div
                                     key={index}
-                                    type="button"
-                                    onClick={() => handleSelect(option)}
                                     className={`
                                         w-full px-4 py-2.5 
                                         flex items-center justify-between gap-2
                                         text-left text-sm
                                         transition-all duration-150
+                                        group
                                         ${value === option
-                                            ? "bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 font-semibold"
-                                            : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5 font-medium"
+                                            ? "bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400"
+                                            : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5"
                                         }
                                     `}
                                 >
-                                    <span className="truncate">{option}</span>
-                                    {value === option && (
-                                        <Check size={16} className="text-brand-500 dark:text-brand-400 flex-shrink-0" />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSelect(option)}
+                                        className="flex-1 text-left truncate font-medium"
+                                    >
+                                        {option}
+                                        {value === option && (
+                                            <Check size={14} className="inline-block ml-2 text-brand-500 dark:text-brand-400" />
+                                        )}
+                                    </button>
+
+                                    {allowDelete && onDelete && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleDelete(e, option)}
+                                            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-md transition-all"
+                                            title={`Delete ${option}`}
+                                        >
+                                            <Trash2 size={14} className="text-red-600 dark:text-red-400" />
+                                        </button>
                                     )}
-                                </button>
+                                </div>
                             ))
                         )}
                     </div>
@@ -159,7 +187,7 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
                             <div className="mx-3 my-1.5 border-t border-gray-100 dark:border-gray-700" />
 
                             <div className="px-3 pb-1.5">
-                                <div className="flex items-center gap-2 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                                <div className="flex items-center gap-2 bg-gray-50 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
                                     <input
                                         ref={inputRef}
                                         type="text"
@@ -180,15 +208,16 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
                                         onClick={handleAddNew}
                                         disabled={!newItemValue.trim()}
                                         className={`
-                                            p-2 mr-1 rounded-lg
-                                            transition-all duration-200
+                                            px-3 py-2 mr-1 rounded-lg font-semibold text-sm
+                                            transition-all duration-200 flex items-center gap-1
                                             ${newItemValue.trim()
-                                                ? "text-white bg-brand-500 hover:bg-brand-600 shadow-sm cursor-pointer"
+                                                ? "text-white bg-green-600 hover:bg-green-700 shadow-sm cursor-pointer"
                                                 : "text-gray-400 dark:text-gray-600 bg-gray-200 dark:bg-gray-700 cursor-not-allowed"
                                             }
                                         `}
                                     >
-                                        <Plus size={16} />
+                                        <Plus size={14} />
+                                        Add
                                     </button>
                                 </div>
                             </div>

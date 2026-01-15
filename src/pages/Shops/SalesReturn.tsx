@@ -5,46 +5,23 @@ import PageMeta from "../../components/common/PageMeta";
 import CustomDropdown from "../../components/common/CustomDropdown";
 import toast from "react-hot-toast";
 import {
-  Search,
   RotateCcw,
   AlertCircle,
-  ArrowLeft,
   Save,
-  Truck,
   Scan,
-  FileText,
-  User,
-  Phone,
-  Calendar,
-  Package,
 } from "lucide-react";
 import {
-  getInvoiceById,
-  addCustomerReturn,
   addWarehouseReturn,
   updateBranchStockStatus,
   getStockItemByBarcode,
-  InvoiceData,
-  CustomerReturnItem,
-  WarehouseReturnItem,
 } from "../../firebase/salesReturns";
-import { doc, updateDoc, collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
 
 type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
-type ReturnType = "customer-to-shop" | "shop-to-warehouse";
 
 const BRANCHES: BranchName[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
-
-const CUSTOMER_RETURN_REASONS = [
-  "Defective",
-  "Wrong Item",
-  "Customer Changed Mind",
-  "Size Issue",
-  "Quality Issue",
-  "Other",
-];
 
 const WAREHOUSE_RETURN_REASONS = [
   "Unsold Stock",
@@ -55,20 +32,7 @@ const WAREHOUSE_RETURN_REASONS = [
 ];
 
 export default function SalesReturn() {
-  const [returnType, setReturnType] = useState<ReturnType>("customer-to-shop");
   const [selectedBranch, setSelectedBranch] = useState<BranchName>("Sangli");
-
-  // Customer Return States
-  const [invoiceId, setInvoiceId] = useState("");
-  const [invoice, setInvoice] = useState<(InvoiceData & { id: string }) | null>(null);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
-  const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
-
-  // Recent Invoices States
-  const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
-  const [showRecentInvoices, setShowRecentInvoices] = useState(true);
-  const [loadingRecent, setLoadingRecent] = useState(false);
 
   // Warehouse Return States
   const [scannedItems, setScannedItems] = useState<any[]>([]);
@@ -81,90 +45,6 @@ export default function SalesReturn() {
 
   // Barcode scanner mode state
   const [scannerEnabled, setScannerEnabled] = useState(false);
-
-  // Load recent invoices for the selected branch
-  const loadRecentInvoices = async () => {
-    setLoadingRecent(true);
-    try {
-      const invoicesRef = collection(db, "shops", selectedBranch, "invoices");
-      const q = query(
-        invoicesRef,
-        orderBy("createdAt", "desc"),
-        limit(20)
-      );
-      const snap = await getDocs(q);
-
-      const invoices = snap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      setRecentInvoices(invoices);
-    } catch (error) {
-      console.error("Error loading recent invoices:", error);
-      toast.error("Failed to load recent invoices");
-    } finally {
-      setLoadingRecent(false);
-    }
-  };
-
-  // Load recent invoices when branch changes (only for customer returns)
-  useEffect(() => {
-    if (returnType === "customer-to-shop") {
-      loadRecentInvoices();
-    }
-  }, [selectedBranch, returnType]);
-
-  // Select invoice from recent list
-  const selectInvoice = (selectedInvoice: any) => {
-    setInvoiceId(selectedInvoice.invoiceId || selectedInvoice.id);
-    setInvoice(selectedInvoice);
-    setShowRecentInvoices(false);
-    setSelectedItems(new Set());
-    setReturnReasons({});
-    setReturnRemarks({});
-  };
-
-  // Go back to recent invoices
-  const goBackToRecentInvoices = () => {
-    setShowRecentInvoices(true);
-    setInvoice(null);
-    setInvoiceId("");
-    setSelectedItems(new Set());
-    setReturnReasons({});
-    setReturnRemarks({});
-  };
-
-  // Search Invoice (Customer Return)
-  const handleSearchInvoice = async () => {
-    if (!invoiceId.trim()) {
-      toast.error("Enter invoice ID");
-      return;
-    }
-
-    setSearching(true);
-    try {
-      const foundInvoice = await getInvoiceById(selectedBranch, invoiceId.trim());
-
-      if (!foundInvoice) {
-        toast.error(`Invoice ${invoiceId} not found in ${selectedBranch}`);
-        setInvoice(null);
-        return;
-      }
-
-      setInvoice(foundInvoice);
-      setShowRecentInvoices(false);
-      setSelectedItems(new Set());
-      setReturnReasons({});
-      setReturnRemarks({});
-      toast.success(`Found invoice with ${foundInvoice.items.length} items`);
-    } catch (error) {
-      console.error("Error searching invoice:", error);
-      toast.error("Failed to search invoice");
-    } finally {
-      setSearching(false);
-    }
-  };
 
   // Handle Barcode Scan (Warehouse Return)
   const handleBarcodeScan = async (barcode: string) => {
@@ -206,76 +86,6 @@ export default function SalesReturn() {
   // Clear scanned queue
   const clearScannedQueue = () => {
     setScannedItems([]);
-  };
-
-  // Process Customer Return
-  const handleProcessCustomerReturn = async () => {
-    if (selectedItems.size === 0) {
-      toast.error("Select at least one item to return");
-      return;
-    }
-
-    // Validate reasons
-    for (const barcode of selectedItems) {
-      if (!returnReasons[barcode]) {
-        toast.error("Select return reason for all items");
-        return;
-      }
-    }
-
-    setProcessing(true);
-    const loadingToast = toast.loading(`Processing ${selectedItems.size} return(s)...`);
-
-    try {
-      const returnId = `CR-${selectedBranch}-${Date.now()}`;
-
-      for (const barcode of selectedItems) {
-        const item = invoice!.items.find(i => i.barcode === barcode);
-        if (!item) continue;
-
-        // Add customer return record
-        await addCustomerReturn(selectedBranch, {
-          returnId,
-          invoiceId: invoice!.id,
-          branch: selectedBranch,
-          barcode: item.barcode,
-          category: item.category,
-          subcategory: item.subcategory,
-          location: item.location,
-          type: item.type,
-          weight: item.weight,
-          sellingPrice: item.sellingPrice,
-          discount: item.discount || 0,
-          taxableAmount: item.taxableAmount,
-          returnReason: returnReasons[barcode],
-          remarks: returnRemarks[barcode] || "",
-          returnedBy: "current-user", // TODO: Get from auth
-          returnDate: new Date().toISOString(),
-          status: "returned-to-shop",
-        });
-
-        // Update stock status back to "in-branch"
-        await updateBranchStockStatus(selectedBranch, barcode, "in-branch");
-      }
-
-      toast.dismiss(loadingToast);
-      toast.success(`✅ ${selectedItems.size} item(s) returned to shop inventory`);
-
-      // Reset
-      setInvoice(null);
-      setInvoiceId("");
-      setSelectedItems(new Set());
-      setReturnReasons({});
-      setReturnRemarks({});
-      setShowRecentInvoices(true);
-      loadRecentInvoices(); // Refresh the list
-    } catch (error) {
-      console.error("Error processing customer return:", error);
-      toast.dismiss(loadingToast);
-      toast.error("Failed to process return");
-    } finally {
-      setProcessing(false);
-    }
   };
 
   // Process Warehouse Return
@@ -355,82 +165,24 @@ export default function SalesReturn() {
 
   return (
     <>
-      <PageMeta title="Sales Return Management" description="Handle customer returns and shop-to-warehouse returns" />
+      <PageMeta title="Shop to Warehouse Return" description="Handle shop-to-warehouse returns" />
 
       <div className="grid grid-cols-12 gap-6">
         <div className="col-span-12">
           <TASection
-            title="🔄 Sales Return Management"
-            subtitle="Process customer returns and shop-to-warehouse returns"
+            title="🔄 Shop to Warehouse Return"
+            subtitle="Process shop-to-warehouse returns"
           >
-            {/* Return Type Selection */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <button
-                onClick={() => {
-                  setReturnType("customer-to-shop");
-                  setInvoice(null);
-                  setScannedItems([]);
-                }}
-                className={`p-6 rounded-xl border-2 transition-all ${returnType === "customer-to-shop"
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                    : "border-gray-200 dark:border-gray-800 hover:border-gray-300"
-                  }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <ArrowLeft
-                    className={returnType === "customer-to-shop" ? "text-blue-600 dark:text-blue-400" : "text-gray-400"}
-                    size={24}
-                  />
-                  <h3 className={`font-bold text-lg ${returnType === "customer-to-shop" ? "text-blue-900 dark:text-blue-300" : "text-gray-700 dark:text-gray-300"}`}>
-                    Customer Return
-                  </h3>
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Customer returns sold items. Items go back to shop inventory.
-                </p>
-              </button>
-
-              <button
-                onClick={() => {
-                  setReturnType("shop-to-warehouse");
-                  setInvoice(null);
-                  setScannedItems([]);
-                }}
-                className={`p-6 rounded-xl border-2 transition-all ${returnType === "shop-to-warehouse"
-                    ? "border-purple-500 bg-purple-50 dark:bg-purple-900/20"
-                    : "border-gray-200 dark:border-gray-800 hover:border-gray-300"
-                  }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <Truck
-                    className={returnType === "shop-to-warehouse" ? "text-purple-600 dark:text-purple-400" : "text-gray-400"}
-                    size={24}
-                  />
-                  <h3 className={`font-bold text-lg ${returnType === "shop-to-warehouse" ? "text-purple-900 dark:text-purple-300" : "text-gray-700 dark:text-gray-300"}`}>
-                    Shop to Warehouse
-                  </h3>
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Shop returns unsold/damaged items to warehouse.
-                </p>
-              </button>
-            </div>
-
             {/* Info Banner */}
-            <div className={`mb-6 p-4 rounded-xl border ${returnType === "customer-to-shop"
-                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
-                : "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
-              }`}>
+            <div className="mb-6 p-4 rounded-xl border bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800">
               <div className="flex items-start gap-3">
-                <AlertCircle className={returnType === "customer-to-shop" ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"} size={20} />
+                <AlertCircle className="text-purple-600 dark:text-purple-400" size={20} />
                 <div>
-                  <h3 className={`font-semibold mb-1 ${returnType === "customer-to-shop" ? "text-blue-800 dark:text-blue-400" : "text-purple-800 dark:text-purple-400"}`}>
-                    {returnType === "customer-to-shop" ? "📋 Customer Return Process" : "📋 Warehouse Return Process"}
+                  <h3 className="font-semibold mb-1 text-purple-800 dark:text-purple-400">
+                    📋 Warehouse Return Process
                   </h3>
-                  <p className={`text-sm ${returnType === "customer-to-shop" ? "text-blue-800 dark:text-blue-300" : "text-purple-800 dark:text-purple-300"}`}>
-                    {returnType === "customer-to-shop"
-                      ? "Search invoice → Select items → Specify reason → Process return. Items will be marked as 'in-branch'."
-                      : "Scan barcodes → Specify reason → Process return. Items will be sent to warehouse."}
+                  <p className="text-sm text-purple-800 dark:text-purple-300">
+                    Scan barcodes → Specify reason → Process return. Items will be sent to warehouse.
                   </p>
                 </div>
               </div>
@@ -446,257 +198,14 @@ export default function SalesReturn() {
                 value={selectedBranch}
                 onChange={(val) => setSelectedBranch(val as BranchName)}
                 placeholder="Select Branch"
-                disabled={!!invoice || scannedItems.length > 0}
+                disabled={scannedItems.length > 0}
               />
             </div>
 
-            {/* CUSTOMER RETURN SECTION */}
-            {returnType === "customer-to-shop" && (
-              <>
-                {showRecentInvoices && !invoice ? (
-                  <>
-                    {/* Invoice Search */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                      <div>
-                        <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">
-                          <Search className="inline mr-1" size={14} />
-                          Search by Invoice ID
-                        </label>
-                        <input
-                          type="text"
-                          value={invoiceId}
-                          onChange={(e) => setInvoiceId(e.target.value)}
-                          placeholder="Enter invoice ID (e.g., INV-1234567890)"
-                          className={inputStyle}
-                          onKeyPress={(e) => e.key === "Enter" && handleSearchInvoice()}
-                        />
-                      </div>
-                      <div className="flex items-end">
-                        <button
-                          onClick={handleSearchInvoice}
-                          disabled={searching}
-                          className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          {searching ? (
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          ) : (
-                            <Search size={18} />
-                          )}
-                          Search Invoice
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Recent Invoices List */}
-                    <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                          📋 Recent Invoices ({selectedBranch})
-                        </h3>
-                        <button
-                          onClick={loadRecentInvoices}
-                          disabled={loadingRecent}
-                          className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                        >
-                          {loadingRecent ? "Loading..." : "Refresh"}
-                        </button>
-                      </div>
-
-                      {loadingRecent ? (
-                        <div className="text-center py-8">
-                          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                          <p className="text-gray-500 dark:text-gray-400">Loading recent invoices...</p>
-                        </div>
-                      ) : recentInvoices.length === 0 ? (
-                        <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl">
-                          <FileText className="mx-auto mb-2 text-gray-400" size={48} />
-                          <p className="text-gray-500 dark:text-gray-400">No invoices found for {selectedBranch}</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3 max-h-96 overflow-y-auto">
-                          {recentInvoices.map((inv) => (
-                            <div
-                              key={inv.id}
-                              className="p-4 border border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-white/5 hover:shadow-md transition-shadow cursor-pointer"
-                              onClick={() => selectInvoice(inv)}
-                            >
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <FileText className="text-blue-600 dark:text-blue-400" size={20} />
-                                  <span className="font-semibold text-gray-900 dark:text-white">
-                                    {inv.invoiceId || inv.id}
-                                  </span>
-                                </div>
-                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                  {new Date(inv.createdAt).toLocaleDateString()}
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div className="flex items-center gap-1">
-                                  <User className="text-gray-400" size={14} />
-                                  <span className="text-gray-600 dark:text-gray-400">
-                                    {inv.customerName || "Walk-in Customer"}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <Phone className="text-gray-400" size={14} />
-                                  <span className="text-gray-600 dark:text-gray-400">
-                                    {inv.customerPhone || "N/A"}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between mt-2">
-                                <div className="flex items-center gap-1">
-                                  <Package className="text-gray-400" size={14} />
-                                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                                    {inv.items?.length || 0} items
-                                  </span>
-                                </div>
-                                <div className="text-lg font-bold text-green-600 dark:text-green-400">
-                                  ₹{(inv.totals?.grandTotal || inv.totalAmount || 0).toLocaleString()}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : null}
-
-                {/* Invoice Items */}
-                {invoice && (
-                  <>
-                    {/* Back Button */}
-                    <div className="mb-4">
-                      <button
-                        onClick={goBackToRecentInvoices}
-                        className="flex items-center gap-2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                      >
-                        <ArrowLeft size={16} />
-                        Back to Recent Invoices
-                      </button>
-                    </div>
-
-                    <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <h3 className="font-semibold text-green-800 dark:text-green-400">✅ Invoice Found</h3>
-                          <p className="text-sm text-green-700 dark:text-green-300">
-                            Customer: <strong>{invoice.customerName || "N/A"}</strong> •
-                            Total: <strong>₹{invoice.totals.grandTotal.toLocaleString()}</strong>
-                          </p>
-                        </div>
-                        <button
-                          onClick={goBackToRecentInvoices}
-                          className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden mb-4">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100 dark:bg-white/10">
-                          <tr className="text-left">
-                            <th className="p-3">
-                              <input
-                                type="checkbox"
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedItems(new Set(invoice.items.map(i => i.barcode)));
-                                  } else {
-                                    setSelectedItems(new Set());
-                                  }
-                                }}
-                                checked={selectedItems.size === invoice.items.length}
-                              />
-                            </th>
-                            <th className="p-3">Item</th>
-                            <th className="p-3">Barcode</th>
-                            <th className="p-3">Price</th>
-                            <th className="p-3">Reason *</th>
-                            <th className="p-3">Remarks</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {invoice.items.map((item) => (
-                            <tr key={item.barcode} className="border-b border-gray-200 dark:border-gray-800">
-                              <td className="p-3">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedItems.has(item.barcode)}
-                                  onChange={(e) => {
-                                    const newSet = new Set(selectedItems);
-                                    if (e.target.checked) {
-                                      newSet.add(item.barcode);
-                                    } else {
-                                      newSet.delete(item.barcode);
-                                    }
-                                    setSelectedItems(newSet);
-                                  }}
-                                />
-                              </td>
-                              <td className="p-3">
-                                <div>
-                                  <p className="font-semibold">{item.category}</p>
-                                  <p className="text-xs text-gray-500">{item.subcategory}</p>
-                                </div>
-                              </td>
-                              <td className="p-3 font-mono text-xs">{item.barcode}</td>
-                              <td className="p-3">₹{item.sellingPrice.toLocaleString()}</td>
-                              <td className="p-3">
-                                <select
-                                  value={returnReasons[item.barcode] || ""}
-                                  onChange={(e) => setReturnReasons({ ...returnReasons, [item.barcode]: e.target.value })}
-                                  className={inputStyle}
-                                  disabled={!selectedItems.has(item.barcode)}
-                                >
-                                  <option value="">Select reason</option>
-                                  {CUSTOMER_RETURN_REASONS.map(r => (
-                                    <option key={r} value={r}>{r}</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="p-3">
-                                <input
-                                  type="text"
-                                  value={returnRemarks[item.barcode] || ""}
-                                  onChange={(e) => setReturnRemarks({ ...returnRemarks, [item.barcode]: e.target.value })}
-                                  placeholder="Optional"
-                                  className={inputStyle}
-                                  disabled={!selectedItems.has(item.barcode)}
-                                />
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="flex justify-end">
-                      <button
-                        onClick={handleProcessCustomerReturn}
-                        disabled={processing || selectedItems.size === 0}
-                        className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
-                      >
-                        <Save size={18} />
-                        Process Return ({selectedItems.size})
-                      </button>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-
             {/* WAREHOUSE RETURN SECTION */}
-            {returnType === "shop-to-warehouse" && (
-              <>
-                {/* Barcode Scanner Mode Section */}
-                <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
+            <>
+              {/* Barcode Scanner Mode Section */}
+              <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
                     <label className="flex items-center gap-2 text-sm font-semibold text-indigo-800 dark:text-indigo-400">
                       <Scan size={18} />
@@ -819,16 +328,13 @@ export default function SalesReturn() {
                   </>
                 )}
               </>
-            )}
 
             {/* Empty State */}
-            {!invoice && scannedItems.length === 0 && (
+            {scannedItems.length === 0 && (
               <div className="p-12 text-center text-gray-500 dark:text-gray-400">
                 <RotateCcw size={48} className="mx-auto mb-4 opacity-50" />
                 <p className="font-medium">
-                  {returnType === "customer-to-shop"
-                    ? "Search for an invoice to start processing customer returns"
-                    : "Scan barcodes to start processing warehouse returns"}
+                  Scan barcodes to start processing warehouse returns
                 </p>
               </div>
             )}

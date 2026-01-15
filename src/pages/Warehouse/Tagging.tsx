@@ -178,10 +178,10 @@ export default function Tagging() {
   };
 
   // --------------------------------------------------------------------------------------
-  // Print Workflow - Updates DB status to "printed"
+  // Print Workflow - Navigate to clean preview page
   // --------------------------------------------------------------------------------------
   const printSelected = async () => {
-    const selectedItems = grid.filter((item) => item.isSelected && !item.isPrinted);
+    const selectedItems = grid.filter((item) => item.isSelected);
     if (selectedItems.length === 0) {
       return toast.error("Please select items to print");
     }
@@ -193,197 +193,23 @@ export default function Tagging() {
       return;
     }
 
-    // Generate HTML for printing directly
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    // Prepare print data with all necessary information
+    const printItems = selectedItems.map(item => ({
+      barcodeValue: item.barcodeValue,
+      serial: item.serial,
+      category: category,
+      design: design,
+      location: location,
+      type: type,
+      remark: remark,
+    }));
 
-    if (!printWindow) {
-      toast.error("Please allow pop-ups to print labels");
-      return;
-    }
+    // Store data in localStorage for print page
+    localStorage.setItem("print_barcodes", JSON.stringify(printItems));
+    localStorage.setItem("print_item_barcodes", JSON.stringify(selectedItems.map(i => i.barcodeValue)));
 
-    // Generate barcode print layout
-    const barcodesHtml = selectedItems.map(item => `
-      <div class="barcode-label">
-        <div class="barcode-info">
-          <div class="info-row">
-            <span class="label">Category:</span>
-            <span class="value">${category}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Design:</span>
-            <span class="value">${design}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Location:</span>
-            <span class="value">${location}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Type:</span>
-            <span class="value">${type}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Item:</span>
-            <span class="value">${remark}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Serial:</span>
-            <span class="value font-bold">${item.serial}</span>
-          </div>
-        </div>
-        <div class="barcode-container">
-          <svg class="barcode" data-value="${item.barcodeValue}"></svg>
-          <div class="barcode-text">${item.barcodeValue}</div>
-        </div>
-      </div>
-    `).join('');
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Print Barcode Labels - ${category}</title>
-        <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { 
-            font-family: Arial, sans-serif; 
-            padding: 10mm; 
-            background: white;
-          }
-          .barcode-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10mm;
-            margin: 0 auto;
-          }
-          .barcode-label {
-            border: 2px solid #000;
-            padding: 8mm;
-            background: white;
-            page-break-inside: avoid;
-            display: flex;
-            flex-direction: column;
-            gap: 5mm;
-          }
-          .barcode-info {
-            display: flex;
-            flex-direction: column;
-            gap: 3mm;
-          }
-          .info-row {
-            display: flex;
-            gap: 5mm;
-            font-size: 11pt;
-          }
-          .label {
-            font-weight: bold;
-            min-width: 80px;
-          }
-          .value {
-            flex: 1;
-          }
-          .font-bold {
-            font-weight: bold;
-            font-size: 13pt;
-          }
-          .barcode-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 2mm;
-            border-top: 1px solid #ccc;
-            padding-top: 5mm;
-          }
-          .barcode {
-            max-width: 100%;
-            height: auto;
-          }
-          .barcode-text {
-            font-family: monospace;
-            font-size: 12pt;
-            font-weight: bold;
-            letter-spacing: 2px;
-          }
-          @media print {
-            body { padding: 5mm; }
-            .no-print { display: none !important; }
-            @page {
-              size: A4;
-              margin: 10mm;
-            }
-          }
-          .print-header {
-            text-align: center;
-            margin-bottom: 10mm;
-            padding: 5mm;
-            border-bottom: 2px solid #000;
-          }
-          .print-header h1 {
-            font-size: 20pt;
-            margin-bottom: 2mm;
-          }
-          .print-header .subtitle {
-            font-size: 12pt;
-            color: #666;
-          }
-          .no-print {
-            text-align: center;
-            margin: 20px 0;
-          }
-          .no-print button {
-            padding: 10px 30px;
-            font-size: 16px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-          }
-          .no-print button:hover {
-            background: #0056b3;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="print-header">
-          <h1>MangalMurthi Jewellers</h1>
-          <div class="subtitle">Barcode Labels - ${category} (${selectedItems.length} items)</div>
-        </div>
-        
-        <div class="no-print">
-          <button onclick="window.print()">🖨️ Print Labels</button>
-        </div>
-
-        <div class="barcode-grid">
-          ${barcodesHtml}
-        </div>
-
-        <script>
-          // Generate barcodes after page loads
-          window.onload = function() {
-            const barcodes = document.querySelectorAll('.barcode');
-            barcodes.forEach(svg => {
-              const value = svg.getAttribute('data-value');
-              try {
-                JsBarcode(svg, value, {
-                  format: 'CODE128',
-                  width: 2,
-                  height: 60,
-                  displayValue: false,
-                  margin: 5
-                });
-              } catch (error) {
-                console.error('Error generating barcode:', error);
-              }
-            });
-          };
-        </script>
-      </body>
-      </html>
-    `;
-
-    printWindow.document.write(html);
-    printWindow.document.close();
+    // Open clean preview page in new window
+    window.open("/print-barcodes", "_blank", "width=1200,height=800");
 
     // Mark items as printed in UI
     setGrid((prev) =>
@@ -394,27 +220,7 @@ export default function Tagging() {
       )
     );
 
-    // Update database status to "printed"
-    try {
-      // Get item IDs from database by barcode
-      const itemIds: string[] = [];
-      for (const item of selectedItems) {
-        const dbItem = await getItemByBarcode(item.barcodeValue);
-        if (dbItem?.id) {
-          itemIds.push(dbItem.id);
-        }
-      }
-
-      if (itemIds.length > 0) {
-        await markItemsPrinted(itemIds);
-        console.log(`✅ Marked ${itemIds.length} items as printed in database`);
-      }
-    } catch (error) {
-      console.error("Error updating print status:", error);
-      // Don't show error to user - print window already opened
-    }
-
-    toast.success(`Opening print window for ${selectedItems.length} items`, { duration: 3000 });
+    toast.success(`Opening print preview for ${selectedItems.length} items`, { duration: 3000 });
   };
 
   // --------------------------------------------------------------------------------------
