@@ -324,7 +324,7 @@ export default function SalesBooking() {
 
   // Calculate item taxable amount (with discount)
   const calculateItemTaxable = (item: BookingItem): BookingItem => {
-    const taxable = item.sellingPrice - item.discount;
+    const taxable = (item.sellingPrice || 0) - (item.discount || 0);
     return {
       ...item,
       taxableAmount: Math.max(taxable, 0),
@@ -413,7 +413,7 @@ export default function SalesBooking() {
 
     // Check if all items have required fields
     const invalidItems = bookingItems.filter(
-      (item) => !item.itemName.trim() || !item.weight
+      (item) => !item.itemName?.trim() || !item.weight
     );
     if (invalidItems.length > 0) {
       toast.error("Please fill item name and weight for all items");
@@ -989,12 +989,12 @@ export default function SalesBooking() {
     // Table with professional styling
     const tableData = bookingItems.map((item, idx) => [
       idx + 1,
-      item.itemName,
+      item.itemName || "-",
       item.stoneSapphire || "-",
       item.trNo || "-",
-      item.pieces,
-      item.weight,
-      `₹${item.total.toFixed(2)}`,
+      item.pieces || 0,
+      item.weight || "-",
+      `₹${(item.total || 0).toFixed(2)}`,
     ]);
 
     autoTable(doc, {

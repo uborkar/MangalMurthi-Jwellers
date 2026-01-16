@@ -20,7 +20,7 @@ import {
 // UNIFIED WAREHOUSE ITEM MODEL
 // ═══════════════════════════════════════════════════════════════════════
 
-export type ItemStatus = 
+export type ItemStatus =
   | "tagged"      // Just created, not printed yet
   | "printed"     // Labels printed, ready for stock-in
   | "stocked"     // In warehouse stock
@@ -30,29 +30,30 @@ export type ItemStatus =
 
 export interface WarehouseItem {
   id?: string;
-  
+
   // Barcode & Identity
   barcode: string; // MG-RNG-MAL-25-000001
   serial: number;
-  
+
   // Category Information
   category: string; // Ring, Necklace, Bracelet, etc.
   subcategory: string; // Design/Pattern (e.g., FLORAL)
   categoryCode: string; // RNG, NCK, BRC, etc.
-  
+
   // Physical Attributes
   weight: string;
   location: string; // Mumbai Malad, Pune, Sangli
   locationCode: string; // MAL, PUN, SAN
-  
+
   // Pricing
   costPrice: number;
   costPriceType: string; // CP-A, CP-B, etc.
+  type?: string; // Alternative name for costPriceType
   sellingPrice?: number;
-  
+
   // Status Tracking (SINGLE SOURCE OF TRUTH)
   status: ItemStatus;
-  
+
   // Workflow Timestamps
   taggedAt: string;
   printedAt?: string;
@@ -65,11 +66,11 @@ export interface WarehouseItem {
   soldInvoiceId?: string;
   returnedAt?: string;
   returnedReason?: string;
-  
+
   // Metadata
   remark: string; // Item name/description
   year: number;
-  
+
   // Audit
   createdAt: string;
   createdBy?: string;
@@ -97,7 +98,7 @@ export async function addWarehouseItem(
   item: Omit<WarehouseItem, "id" | "createdAt" | "updatedAt" | "status">
 ): Promise<string> {
   const now = new Date().toISOString();
-  
+
   const payload: Omit<WarehouseItem, "id"> = {
     ...item,
     status: "tagged",
@@ -105,7 +106,7 @@ export async function addWarehouseItem(
     createdAt: now,
     updatedAt: now,
   };
-  
+
   const docRef = await addDoc(ITEMS_COLLECTION, payload);
   return docRef.id;
 }
@@ -118,7 +119,7 @@ export async function batchAddWarehouseItems(
 ): Promise<number> {
   const batch = writeBatch(db);
   const now = new Date().toISOString();
-  
+
   items.forEach((item) => {
     const docRef = doc(ITEMS_COLLECTION);
     const payload: Omit<WarehouseItem, "id"> = {
@@ -130,7 +131,7 @@ export async function batchAddWarehouseItems(
     };
     batch.set(docRef, payload);
   });
-  
+
   await batch.commit();
   return items.length;
 }
@@ -158,16 +159,16 @@ export async function getItemsByStatus(status: ItemStatus): Promise<WarehouseIte
   const q = query(ITEMS_COLLECTION, where("status", "==", status));
   const snap = await getDocs(q);
   console.log(`✅ Query returned ${snap.size} documents`);
-  
+
   const items = snap.docs.map((d) => ({
     id: d.id,
     ...(d.data() as Omit<WarehouseItem, "id">),
   }));
-  
+
   if (items.length > 0) {
     console.log("📦 Sample item:", items[0]);
   }
-  
+
   return items;
 }
 
@@ -177,9 +178,9 @@ export async function getItemsByStatus(status: ItemStatus): Promise<WarehouseIte
 export async function getItemByBarcode(barcode: string): Promise<WarehouseItem | null> {
   const q = query(ITEMS_COLLECTION, where("barcode", "==", barcode));
   const snap = await getDocs(q);
-  
+
   if (snap.empty) return null;
-  
+
   return {
     id: snap.docs[0].id,
     ...(snap.docs[0].data() as Omit<WarehouseItem, "id">),
@@ -243,13 +244,13 @@ export async function updateItemStatus(
   metadata?: Record<string, any>
 ): Promise<void> {
   const now = new Date().toISOString();
-  
+
   const updates: Record<string, any> = {
     status: newStatus,
     updatedAt: now,
     ...metadata,
   };
-  
+
   // Add timestamp for status transition
   switch (newStatus) {
     case "printed":
@@ -268,10 +269,10 @@ export async function updateItemStatus(
       updates.returnedAt = now;
       break;
   }
-  
+
   // Remove undefined values
   const cleanedUpdates = removeUndefinedValues(updates);
-  
+
   await updateDoc(doc(ITEMS_COLLECTION, itemId), cleanedUpdates);
 }
 
@@ -285,13 +286,13 @@ export async function batchUpdateItemStatus(
 ): Promise<number> {
   const batch = writeBatch(db);
   const now = new Date().toISOString();
-  
+
   const updates: Record<string, any> = {
     status: newStatus,
     updatedAt: now,
     ...metadata,
   };
-  
+
   // Add timestamp for status transition
   switch (newStatus) {
     case "printed":
@@ -310,16 +311,16 @@ export async function batchUpdateItemStatus(
       updates.returnedAt = now;
       break;
   }
-  
+
   // Remove undefined values
   const cleanedUpdates = removeUndefinedValues(updates);
-  
+
   // Update each item's status field
   items.forEach((item) => {
     const docRef = doc(ITEMS_COLLECTION, item.id);
     batch.update(docRef, cleanedUpdates);
   });
-  
+
   await batch.commit();
   return items.length;
 }
@@ -336,7 +337,7 @@ export async function updateItemDetails(
     ...updates,
     updatedAt: new Date().toISOString(),
   });
-  
+
   await updateDoc(doc(ITEMS_COLLECTION, itemId), payload);
 }
 
@@ -440,12 +441,12 @@ export async function batchDeleteItems(
   items: Array<{ id: string; status: ItemStatus }>
 ): Promise<number> {
   const batch = writeBatch(db);
-  
+
   items.forEach((item) => {
     const docRef = doc(ITEMS_COLLECTION, item.id);
     batch.delete(docRef);
   });
-  
+
   await batch.commit();
   return items.length;
 }
@@ -459,7 +460,7 @@ export async function batchDeleteItems(
  */
 export async function getItemCountByStatus(): Promise<Record<ItemStatus, number>> {
   const items = await getAllWarehouseItems();
-  
+
   const counts: Record<ItemStatus, number> = {
     tagged: 0,
     printed: 0,
@@ -468,11 +469,11 @@ export async function getItemCountByStatus(): Promise<Record<ItemStatus, number>
     sold: 0,
     returned: 0,
   };
-  
+
   items.forEach((item) => {
     counts[item.status]++;
   });
-  
+
   return counts;
 }
 
@@ -481,13 +482,13 @@ export async function getItemCountByStatus(): Promise<Record<ItemStatus, number>
  */
 export async function getItemCountByCategory(): Promise<Record<string, number>> {
   const items = await getAllWarehouseItems();
-  
+
   const counts: Record<string, number> = {};
-  
+
   items.forEach((item) => {
     counts[item.category] = (counts[item.category] || 0) + 1;
   });
-  
+
   return counts;
 }
 
@@ -496,7 +497,7 @@ export async function getItemCountByCategory(): Promise<Record<string, number>> 
  */
 export async function getTotalValueByStatus(): Promise<Record<ItemStatus, number>> {
   const items = await getAllWarehouseItems();
-  
+
   const values: Record<ItemStatus, number> = {
     tagged: 0,
     printed: 0,
@@ -505,11 +506,11 @@ export async function getTotalValueByStatus(): Promise<Record<ItemStatus, number
     sold: 0,
     returned: 0,
   };
-  
+
   items.forEach((item) => {
     values[item.status] += item.costPrice || 0;
   });
-  
+
   return values;
 }
 
@@ -537,7 +538,7 @@ export function isValidStatusTransition(from: ItemStatus, to: ItemStatus): boole
     sold: ["returned"],
     returned: ["stocked"],
   };
-  
+
   return validTransitions[from]?.includes(to) || false;
 }
 
@@ -553,6 +554,6 @@ export function getNextValidStatuses(currentStatus: ItemStatus): ItemStatus[] {
     sold: ["returned"],
     returned: ["stocked"],
   };
-  
+
   return validTransitions[currentStatus] || [];
 }
