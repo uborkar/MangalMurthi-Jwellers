@@ -4,6 +4,8 @@ import { BranchStockItem } from "../firebase/shopStock";
 
 type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
+export { type BranchName };
+
 interface BillItem {
   id: string;
   barcode: string;
@@ -20,22 +22,33 @@ interface BillItem {
   warehouseItemId?: string;
 }
 
-interface BookingItem {
+export interface BookingItem {
   id: string;
   barcode?: string;
-  itemName: string;
-  stoneSapphire: string;
-  trNo: string;
-  pieces: number;
+  itemName?: string;
+  stoneSapphire?: string;
+  trNo?: string;
+  pieces?: number;
   weight: string;
-  total: number;
+  total?: number;
+  // Additional properties used in SalesBooking
+  category?: string;
+  subcategory?: string;
+  location?: string;
+  type?: string;
+  costPrice?: number;
+  sellingPrice?: number;
+  discount?: number;
+  taxableAmount?: number;
+  shopStockId?: string;
+  warehouseItemId?: string;
 }
 
 interface ShopContextType {
   // Branch Stock Cache
   branchStockCache: Record<BranchName, BranchStockItem[]>;
   setBranchStockCache: (branch: BranchName, stock: BranchStockItem[]) => void;
-  
+
   // Billing State
   currentBill: {
     branch: BranchName;
@@ -46,7 +59,7 @@ interface ShopContextType {
   };
   updateBill: (updates: Partial<ShopContextType['currentBill']>) => void;
   clearBill: () => void;
-  
+
   // Booking State
   currentBooking: {
     branch: BranchName;
@@ -62,7 +75,7 @@ interface ShopContextType {
   };
   updateBooking: (updates: Partial<ShopContextType['currentBooking']>) => void;
   clearBooking: () => void;
-  
+
   // Loading States
   loadingStates: Record<string, boolean>;
   setLoadingState: (key: string, loading: boolean) => void;

@@ -27,12 +27,14 @@ export interface BranchStockItem {
   goldRate?: number;
   status?: "in-branch" | "reserved" | "sold" | "returned";
   price?: number;
+  sellingPrice?: number; // Final selling price
 
   warehouseItemId?: string;
   location?: string;
   createdAt?: string;
   transferredAt?: string;
   transferredFrom?: string;
+  soldAt?: string; // When the item was sold
 }
 
 export async function getShopStock(shop: string): Promise<BranchStockItem[]> {

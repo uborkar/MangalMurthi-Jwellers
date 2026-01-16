@@ -14,29 +14,11 @@ import BarcodeScanner from "../../components/common/BarcodeScanner";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import { getItemByBarcode } from "../../firebase/warehouseItems";
 import { createBookingLedgerEntry } from "../../firebase/ledger";
-import { useShop } from "../../context/ShopContext";
+import { useShop, BookingItem, BranchName } from "../../context/ShopContext";
 import { createPrintHTML, printDocument } from "../../utils/printUtils";
 import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
 import { numberToWords } from "../../utils/numberToWords";
 import { getAllActiveSalespersons, addSalesperson, deleteSalesperson, Salesperson } from "../../firebase/salespersons";
-
-type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune" | string;
-
-interface BookingItem {
-  id: string;
-  barcode: string;
-  category: string; // Item name
-  subcategory?: string; // Remark/Stone details
-  location: string; // Loct
-  type: string; // Type (CP-A, CP-B, etc.)
-  weight: string;
-  costPrice: number;
-  sellingPrice: number; // Rate
-  discount: number; // Discount
-  taxableAmount: number; // Net Amount (after discount)
-  shopStockId?: string;
-  warehouseItemId?: string;
-}
 
 const DEFAULT_BRANCHES: string[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 
@@ -831,19 +813,20 @@ export default function SalesBooking() {
       </html>
     `;
 
-    // ✅ SAFE: Use iframe with srcdoc (Trusted Types compliant)
-    const printFrame = printWindow.document.createElement('iframe');
-    printFrame.style.position = 'absolute';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = 'none';
+    // Open print window
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    if (!printWindow) {
+      toast.error("Please allow pop-ups to print");
+      return;
+    }
 
-    printFrame.srcdoc = html;
-    printWindow.document.body.appendChild(printFrame);
+    printWindow.document.write(html);
+    printWindow.document.close();
 
-    printFrame.onload = () => {
-      setTimeout(() => {
-        printFrame.contentWindow?.print();
+    // Auto-print when loaded
+    printWindow.onload = function () {
+      setTimeout(function () {
+        printWindow.print();
       }, 500);
     };
 

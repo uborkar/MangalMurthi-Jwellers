@@ -10,11 +10,14 @@ export interface PurchaseRecord {
 
   // Jewellery specific fields
   itemDescription: string;
+  productDescription?: string; // For CA reports
   category?: string; // Gold, Silver, Diamond, etc.
   design?: string;
   weight: number; // in grams
   purity?: string; // 22K, 18K, 916, etc.
   rate: number; // per gram
+  hsnCode?: string; // HSN code for GST
+  quantity?: number; // Quantity of items
 
   // Pricing
   baseAmount: number;
@@ -32,6 +35,8 @@ export interface PurchaseRecord {
 
   totalValue: number;
   createdAt: string;
+  customerAddress?: string;
+  placeOfSupply?: string;
 }
 
 export interface SalesRecord {
@@ -40,15 +45,21 @@ export interface SalesRecord {
   customerName: string;
   customerGSTIN?: string;
   customerPhone?: string;
+  customerAddress?: string;
   invoiceNumber: string;
   invoiceDate: string;
+  placeOfSupply?: string;
 
   // Jewellery specific fields
   itemDescription: string;
+  productDescription?: string; // For CA reports
   category?: string;
   design?: string;
   weight: number;
   purity?: string;
+  hsnCode?: string; // HSN code for GST
+  quantity?: number; // Quantity of items
+  rate?: number; // Rate per unit
 
   // Pricing
   goldRate?: number;
