@@ -448,21 +448,9 @@ export default function ShopExpense() {
       </html>
     `;
 
-    // ✅ SAFE: Use iframe with srcdoc (Trusted Types compliant)
-    const printFrame = printWindow.document.createElement('iframe');
-    printFrame.style.position = 'absolute';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = 'none';
-
-    printFrame.srcdoc = html;
-    printWindow.document.body.appendChild(printFrame);
-
-    printFrame.onload = () => {
-      setTimeout(() => {
-        printFrame.contentWindow?.print();
-      }, 500);
-    };
+    // Write directly to the window
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   // Input styles
@@ -631,7 +619,7 @@ export default function ShopExpense() {
                         <th className="p-3 border border-gray-300 dark:border-gray-700 text-right">Amount</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody>-
                       {transactions.map((t, index) => (
                         <tr key={index} className="border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5 print:bg-yellow-100">
                           <td className="p-3 border border-gray-300 dark:border-gray-700 font-semibold text-gray-900 dark:text-white">{t.label}</td>

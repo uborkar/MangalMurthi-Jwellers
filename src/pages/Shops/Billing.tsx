@@ -562,12 +562,12 @@ export default function Billing() {
         .map((item: any) => ({
           barcode: item.barcode,
           category: item.category,
-          subcategory: item.subcategory,
-          location: item.location,
-          type: item.type,
-          weight: item.weight,
+          subcategory: item.subcategory || "",
+          location: item.location || "",
+          type: item.type || "",
+          weight: item.weight || "",
           originalPrice: item.sellingPrice,
-          originalDiscount: item.discount,
+          originalDiscount: item.discount || 0,
           returnRate: 50,
           returnAmount: item.sellingPrice * 0.5,
           returnReason: returnReasons[item.barcode],
@@ -575,7 +575,7 @@ export default function Billing() {
           stockStatus: "returned-to-inventory",
         }));
 
-      // Create return bill record
+      // Create return bill record (only include defined fields)
       const returnBill: Omit<SalesReturnBill, "id" | "createdAt"> = {
         returnId,
         originalInvoiceId: originalInvoice.id || originalInvoice.invoiceId,
@@ -632,6 +632,8 @@ export default function Billing() {
         setBillMode("new-bill");
         setOriginalInvoice(null);
         setSelectedReturnItems(new Set());
+        setReturnReasons({});
+        setReturnRemarks({});
         await loadBranchStock(); // Reload stock
         toast.success(`Return processed! Credit: ₹${creditAmount.toFixed(2)}. Add items for exchange.`);
       } else {
@@ -639,6 +641,8 @@ export default function Billing() {
         // Reset return bill
         setOriginalInvoice(null);
         setSelectedReturnItems(new Set());
+        setReturnReasons({});
+        setReturnRemarks({});
         setBillMode("new-bill");
       }
     } catch (error) {
@@ -1952,70 +1956,30 @@ export default function Billing() {
                                 ₹{returnCalculation.totalOriginalValue.toFixed(2)}
                               </span>
                             </div>
-                            <div className="flex justify-between text-sm">
-                              <span>Return Value (50%):</span>
-                              <span className="font-semibold">
-                                ₹{returnCalculation.totalReturnValue.toFixed(2)}
-                              </span>
-                            </div>
-                            {gstType === 'cgst_sgst' ? (
-                              <>
-                                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                                  <span>CGST ({gstSettings?.cgst || 1.5}%):</span>
-                                  <span>₹{returnCalculation.cgst.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                                  <span>SGST ({gstSettings?.sgst || 1.5}%):</span>
-                                  <span>₹{returnCalculation.sgst.toFixed(2)}</span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                                <span>IGST ({gstSettings?.igst || 3}%):</span>
-                                <span>₹{returnCalculation.igst.toFixed(2)}</span>
-                              </div>
-                            )}
                             <div className="border-t-2 border-green-500 pt-2 mt-2">
                               <div className="flex justify-between text-xl font-bold text-green-600 dark:text-green-400">
-                                <span>Total Credit:</span>
-                                <span>₹{returnCalculation.totalCreditAmount.toFixed(2)}</span>
+                                <span>Return Value (50%):</span>
+                                <span>₹{returnCalculation.totalReturnValue.toFixed(2)}</span>
                               </div>
                             </div>
                           </div>
 
                           <div>
-                            <label className="block text-sm font-medium mb-2">
-                              Settlement Mode *
-                            </label>
-                            <div className="space-y-2">
-                              {(['exchange', 'refund', 'store-credit'] as const).map((mode) => (
-                                <label
-                                  key={mode}
-                                  className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${settlementMode === mode
-                                    ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                                    : 'border-gray-200 dark:border-gray-700 hover:border-green-300'
-                                    }`}
-                                >
-                                  <input
-                                    type="radio"
-                                    name="settlementMode"
-                                    value={mode}
-                                    checked={settlementMode === mode}
-                                    onChange={(e) => setSettlementMode(e.target.value as any)}
-                                    className="text-green-600"
-                                  />
-                                  <div>
-                                    <p className="font-semibold capitalize">
-                                      {mode === 'store-credit' ? 'Store Credit' : mode}
-                                    </p>
-                                    <p className="text-xs text-gray-600 dark:text-gray-400">
-                                      {mode === 'exchange' && 'Exchange for new items'}
-                                      {mode === 'refund' && 'Cash/Payment refund'}
-                                      {mode === 'store-credit' && 'Save for future purchase'}
-                                    </p>
-                                  </div>
-                                </label>
-                              ))}
+                            <div className="p-4 bg-green-50 dark:bg-green-900/30 border-2 border-green-500 dark:border-green-700 rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="radio"
+                                  name="settlementMode"
+                                  value="exchange"
+                                  checked={true}
+                                  readOnly
+                                  className="text-green-600"
+                                />
+                                <div>
+                                  <p className="font-semibold text-green-900 dark:text-green-300">Exchange Only</p>
+                                  <p className="text-sm text-gray-600 dark:text-gray-400">Return items and exchange for new items</p>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>

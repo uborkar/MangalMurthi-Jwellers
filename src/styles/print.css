@@ -147,35 +147,40 @@
     margin: 8mm;
   }
 
-  /* ONLY hide non-print elements - NOT everything */
-  .no-print {
+  /* CRITICAL: Make everything visible by default in print */
+  * {
+    visibility: visible !important;
+  }
+
+  /* ONLY hide non-print elements */
+  .no-print,
+  .screen-only-info {
     display: none !important;
+    visibility: hidden !important;
   }
 
-  /* Barcode print area - ONLY for barcode printing page */
-  #print-area {
-    display: block !important;
-    position: static !important;
-  }
-
+  /* CRITICAL: Ensure print area and all children are visible */
+  .print-area,
+  .print-area *,
   #print-area,
   #print-area * {
+    display: block !important;
     visibility: visible !important;
+    opacity: 1 !important;
   }
 
   body {
     margin: 0;
     padding: 0;
-    background: white;
+    background: white !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-  }
-
-  .screen-only-info {
-    display: none !important;
+    color-adjust: exact;
   }
 
   .print-header {
+    display: block !important;
+    visibility: visible !important;
     text-align: center;
     margin-bottom: 5mm;
   }
@@ -191,9 +196,10 @@
 
   /* Container */
   .tags-container {
-    display: flex;
+    display: flex !important;
     flex-wrap: wrap;
     gap: 4mm;
+    visibility: visible !important;
   }
 
   /* =====================================
@@ -202,7 +208,8 @@
   .tag-unfolded {
     width: 52.8mm;   /* 2.08 inch */
     height: 12mm;    /* 0.47 inch */
-    display: flex;
+    display: flex !important;
+    visibility: visible !important;
     border: 0.3mm solid #000;
     box-sizing: border-box;
     page-break-inside: avoid;
@@ -218,14 +225,16 @@
     font-size: 5px;
     line-height: 1.1;
     border-right: 0.3mm dashed #000;
-    display: flex;
+    display: flex !important;
+    visibility: visible !important;
     flex-direction: column;
     justify-content: center;
     gap: 0.4mm;
   }
 
   .tag-info-line {
-    display: flex;
+    display: flex !important;
+    visibility: visible !important;
     gap: 0.4mm;
     white-space: nowrap;
     overflow: hidden;
@@ -235,12 +244,14 @@
   .tag-label {
     font-weight: 700;
     min-width: 7mm;
+    visibility: visible !important;
   }
 
   .tag-value {
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
+    visibility: visible !important;
   }
 
   /* FOLD / TIE GAP (VERY NARROW) */
@@ -250,6 +261,8 @@
     border-left: 0.2mm dashed #666;
     border-right: 0.2mm dashed #666;
     box-sizing: border-box;
+    display: block !important;
+    visibility: visible !important;
   }
 
   /* RIGHT SIDE – BARCODE (1 INCH) */
@@ -258,7 +271,8 @@
     height: 12mm;
     padding: 0.4mm;
     box-sizing: border-box;
-    display: flex;
+    display: flex !important;
+    visibility: visible !important;
     flex-direction: column;
     align-items: center;
     justify-content: center;

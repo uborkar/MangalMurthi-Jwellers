@@ -59,10 +59,10 @@ const navItems: NavItem[] = [
         name: "Warehouse Reports",
         path: "/warehouse/reports",
       },
-      {
-        name: "Return Items",
-        path: "/warehouse/returns",
-      },
+      // {
+      //   name: "Return Items",
+      //   path: "/warehouse/returns",
+      // },
       {
         name: "Returned Items",
         path: "/warehouse/returned-items",

@@ -17,13 +17,17 @@ const COLLECTION_NAME = "salespersons";
 // Get all active salespersons
 export const getAllActiveSalespersons = async (): Promise<Salesperson[]> => {
     try {
+        // Fetch all salespersons where active is true
+        // Then sort in JavaScript to avoid compound index requirement
         const q = query(
             collection(db, COLLECTION_NAME),
-            where("active", "==", true),
-            orderBy("name", "asc")
+            where("active", "==", true)
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Salesperson));
+        const salespersons = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Salesperson));
+
+        // Sort by name in JavaScript
+        return salespersons.sort((a, b) => a.name.localeCompare(b.name));
     } catch (error) {
         console.error("Error fetching salespersons:", error);
         return [];

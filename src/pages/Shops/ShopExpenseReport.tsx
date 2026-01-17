@@ -12,6 +12,7 @@ import {
   Filter,
   PieChart,
   BarChart3,
+  Printer,
 } from "lucide-react";
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
 import { db } from "../../firebase/config";
@@ -410,6 +411,167 @@ export default function ShopExpenseReport() {
       toast.dismiss(loadingToast);
       toast.error("Failed to generate Excel report");
     }
+  };
+
+  // Export to PDF - Daily expense reports (one page per day)
+  const exportToPDF = () => {
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) {
+      toast.error("Please allow popups for PDF generation");
+      return;
+    }
+
+    // Group expenses by date
+    const expensesByDate = new Map<string, ExpenseDocument>();
+    expenses.forEach((doc) => {
+      expensesByDate.set(doc.date, doc);
+    });
+
+    // Generate pages for each date in range
+    const pages: string[] = [];
+    const currentDate = new Date(dateFrom);
+    const endDate = new Date(dateTo);
+
+    while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const expenseDoc = expensesByDate.get(dateStr);
+
+      // Get transactions
+      const transactions = expenseDoc?.transactions || [
+        { label: "OPENING BAL", description: "", amount: 0 },
+        { label: "GOLD SALE", description: "", amount: 0 },
+        { label: "GOLD GST", description: "", amount: 0 },
+        { label: "GOLD ADV", description: "", amount: 0 },
+        { label: "STONE SALE", description: "", amount: 0 },
+        { label: "STONE GST", description: "", amount: 0 },
+        { label: "STONE ADVANCE", description: "", amount: 0 },
+        { label: "CASH RECEIVED", description: "POLISHING", amount: 0 },
+        { label: "CASH RECEIVED", description: "GST", amount: 0 },
+      ];
+
+      // Get expenses
+      const expenseEntries = expenseDoc?.entries || [];
+
+      const totalIncome = transactions.reduce((sum, t) => sum + (t.amount || 0), 0);
+      const totalExpense = expenseEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
+      const balance = totalIncome - totalExpense;
+
+      // Transaction rows HTML
+      const transactionRows = transactions.map((t) => `
+        <tr>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99; font-weight: bold;">${t.label}</td>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99;">${t.description || ''}</td>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99; text-align: right;">${t.amount > 0 ? t.amount.toFixed(0) : ''}</td>
+        </tr>
+      `).join('');
+
+      // Expense rows HTML
+      const expenseRows = expenseEntries.map((e) => `
+        <tr>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99; font-weight: bold;">${e.category}</td>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99;">${e.description || ''}</td>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99; text-align: right;">${e.amount > 0 ? e.amount.toFixed(0) : ''}</td>
+        </tr>
+      `).join('');
+
+      // Add empty rows if needed to match format
+      const emptyRowsNeeded = Math.max(0, 10 - expenseEntries.length);
+      const emptyRows = Array(emptyRowsNeeded).fill(null).map(() => `
+        <tr>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99;">&nbsp;</td>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99;">&nbsp;</td>
+          <td style="border: 1px solid #000; padding: 8px; background: #ffff99;">&nbsp;</td>
+        </tr>
+      `).join('');
+
+      const pageHTML = `
+        <div class="page" style="page-break-after: always; padding: 20px;">
+          <!-- Header -->
+          <div style="text-align: center; margin-bottom: 20px; border: 2px solid #000; padding: 10px;">
+            <h1 style="margin: 0; font-size: 18px; font-weight: bold;">MANGALMURTHI JEWELLERS</h1>
+            <div style="background: #ff0000; color: white; font-weight: bold; padding: 5px; margin: 10px 0;">DAILY BRANCH REPORT</div>
+            <p style="margin: 5px 0;">Date: ${new Date(dateStr).toLocaleDateString('en-GB')}</p>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+            <thead>
+              <tr>
+                <th style="border: 1px solid #000; padding: 8px; background: #ffff00; text-align: left; font-weight: bold;">${selectedBranch === 'All' ? (expenseDoc?.branch || 'BRANCH') : selectedBranch}</th>
+                <th style="border: 1px solid #000; padding: 8px; background: #ffff00; text-align: left; font-weight: bold;">TRANSACTION</th>
+                <th style="border: 1px solid #000; padding: 8px; background: #ffff00; text-align: right; font-weight: bold;">AMOUNT</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${transactionRows}
+            </tbody>
+          </table>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+            <thead>
+              <tr>
+                <th style="border: 1px solid #000; padding: 8px; background: #ffff00; text-align: left; font-weight: bold;">EXPENSES</th>
+                <th style="border: 1px solid #000; padding: 8px; background: #ffff00; text-align: left; font-weight: bold;">DESCRIPTION</th>
+                <th style="border: 1px solid #000; padding: 8px; background: #ffff00; text-align: right; font-weight: bold;">AMOUNT</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${expenseRows}
+              ${emptyRows}
+            </tbody>
+          </table>
+
+          <table style="width: 100%; border-collapse: collapse;">
+            <tbody>
+              <tr>
+                <td style="border 1px solid #000; padding: 8px; background: #ffff00; font-weight: bold; text-align: right; width: 70%;">TOTAL</td>
+                <td style="border: 1px solid #000; padding: 8px; background: #ffff00; font-weight: bold; text-align: right; width: 30%;">${totalIncome}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #000; padding: 8px; background: #ff0000; color: white; font-weight: bold; text-align: right;">BALANCE</td>
+                <td style="border: 1px solid #000; padding: 8px; background: #ff0000; color: white; font-weight: bold; text-align: right;">${balance}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      pages.push(pageHTML);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Daily Expense Report - ${dateFrom} to ${dateTo}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; color: #000; }
+          .page { background: white; }
+          table { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          @media print {
+            body { margin: 0; }
+            .page { page-break-after: always; }
+            @page { size: A4; margin: 10mm; }
+          }
+        </style>
+      </head>
+      <body>
+        ${pages.join('')}
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    toast.success(`Generating PDF for ${pages.length} day(s)`);
   };
 
   // Input styles
@@ -833,6 +995,14 @@ export default function ShopExpenseReport() {
                   >
                     <Filter size={18} />
                     Refresh
+                  </button>
+                  <button
+                    onClick={exportToPDF}
+                    disabled={loading}
+                    className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Printer size={18} />
+                    Print Daily Reports (PDF)
                   </button>
                   <button
                     onClick={exportToExcel}

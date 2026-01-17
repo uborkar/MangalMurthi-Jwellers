@@ -30,39 +30,39 @@ export interface SalesReturnBill {
   customerPhone?: string;
   returnDate: string;
   processedBy: string; // salesperson name
-  
+
   // Items being returned
   returnedItems: ReturnedItem[];
-  
+
   // Return calculations
   calculations: {
     totalOriginalValue: number; // Sum of original selling prices
     totalReturnValue: number; // 50% of original (base for GST)
     returnRate: number; // Always 50 (%)
-    cgst: number; // 1.5% of return value
-    sgst: number; // 1.5% of return value
-    igst: number; // 3% of return value (if applicable)
-    totalCreditAmount: number; // Return value + GST
+    cgst: number; // 1.5% of return value (calculated but not added to credit)
+    sgst: number; // 1.5% of return value (calculated but not added to credit)
+    igst: number; // 3% of return value (if applicable, calculated but not added to credit)
+    totalCreditAmount: number; // 50% return value (GST not included)
   };
-  
+
   // Settlement details
   settlementType: "exchange" | "refund" | "store-credit";
-  
+
   // Exchange details (if applicable)
   exchangeInvoiceId?: string; // New bill generated
   newBillTotal?: number;
   creditAdjusted?: number;
   balanceAmount?: number; // +ve = customer pays, -ve = refund
-  
+
   // Refund details (if applicable)
   refundAmount?: number;
   refundMode?: "cash" | "card" | "upi";
-  
+
   // Store credit details (if applicable)
   creditUsed?: boolean;
   creditBalance?: number;
   creditValidUntil?: string;
-  
+
   status: "completed" | "pending" | "cancelled";
   createdAt: string;
   updatedAt?: string;
@@ -129,7 +129,7 @@ export async function createSalesReturnBill(
       ...returnData,
       createdAt: new Date().toISOString(),
     });
-    
+
     console.log("✅ Sales return bill created:", docRef.id);
     return docRef.id;
   } catch (error) {
@@ -148,11 +148,11 @@ export async function getSalesReturnById(
   try {
     const returnRef = doc(db, "shops", branch, "salesReturns", returnId);
     const returnDoc = await getDoc(returnRef);
-    
+
     if (!returnDoc.exists()) {
       return null;
     }
-    
+
     return {
       id: returnDoc.id,
       ...(returnDoc.data() as SalesReturnBill),
@@ -174,7 +174,7 @@ export async function getBranchSalesReturns(
     const returnsRef = collection(db, "shops", branch, "salesReturns");
     const q = query(returnsRef, orderBy("createdAt", "desc"), limit(limitCount));
     const snapshot = await getDocs(q);
-    
+
     return snapshot.docs.map((doc) => ({
       id: doc.id,
       ...(doc.data() as SalesReturnBill),
@@ -196,7 +196,7 @@ export async function getReturnsByInvoice(
     const returnsRef = collection(db, "shops", branch, "salesReturns");
     const q = query(returnsRef, where("originalInvoiceId", "==", invoiceId));
     const snapshot = await getDocs(q);
-    
+
     return snapshot.docs.map((doc) => ({
       id: doc.id,
       ...(doc.data() as SalesReturnBill),
@@ -219,22 +219,22 @@ export async function updateInvoiceWithReturn(
   try {
     const invoiceRef = doc(db, "shops", branch, "invoices", invoiceId);
     const invoiceDoc = await getDoc(invoiceRef);
-    
+
     if (!invoiceDoc.exists()) {
       throw new Error("Invoice not found");
     }
-    
+
     const currentData = invoiceDoc.data();
     const existingReturnIds = currentData.returnIds || [];
     const existingReturnedBarcodes = currentData.returnedItemBarcodes || [];
-    
+
     await updateDoc(invoiceRef, {
       hasReturns: true,
       returnIds: [...existingReturnIds, returnId],
       returnedItemBarcodes: [...existingReturnedBarcodes, ...returnedBarcodes],
       updatedAt: new Date().toISOString(),
     });
-    
+
     console.log("✅ Invoice updated with return info");
   } catch (error) {
     console.error("❌ Error updating invoice:", error);
@@ -255,19 +255,19 @@ export async function updateStockAfterReturn(
     const stockRef = collection(db, "shops", branch, "stockItems");
     const q = query(stockRef, where("barcode", "==", barcode), limit(1));
     const snapshot = await getDocs(q);
-    
+
     if (snapshot.empty) {
       console.warn(`⚠️ Stock item not found for barcode: ${barcode}`);
       return;
     }
-    
+
     const stockDoc = snapshot.docs[0];
     await updateDoc(doc(db, "shops", branch, "stockItems", stockDoc.id), {
       status: status,
       returnedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    
+
     console.log(`✅ Stock status updated: ${barcode} → ${status}`);
   } catch (error) {
     console.error("❌ Error updating stock:", error);
@@ -292,7 +292,7 @@ export async function createStoreCredit(
       ...creditData,
       createdAt: new Date().toISOString(),
     });
-    
+
     console.log("✅ Store credit created:", docRef.id);
     return docRef.id;
   } catch (error) {
@@ -317,7 +317,7 @@ export async function getCustomerStoreCredits(
       orderBy("issuedDate", "desc")
     );
     const snapshot = await getDocs(q);
-    
+
     return snapshot.docs.map((doc) => ({
       id: doc.id,
       ...(doc.data() as StoreCredit),
@@ -340,15 +340,15 @@ export async function useStoreCredit(
   try {
     const creditRef = doc(db, "shops", branch, "storeCredits", creditId);
     const creditDoc = await getDoc(creditRef);
-    
+
     if (!creditDoc.exists()) {
       throw new Error("Store credit not found");
     }
-    
+
     const creditData = creditDoc.data() as StoreCredit;
     const newBalanceAmount = creditData.balanceAmount - usedAmount;
     const newUsedAmount = creditData.usedAmount + usedAmount;
-    
+
     const newUsageHistory = [
       ...(creditData.usageHistory || []),
       {
@@ -357,9 +357,9 @@ export async function useStoreCredit(
         invoiceId,
       },
     ];
-    
+
     const newStatus = newBalanceAmount <= 0 ? "fully-used" : "active";
-    
+
     await updateDoc(creditRef, {
       usedAmount: newUsedAmount,
       balanceAmount: newBalanceAmount,
@@ -367,7 +367,7 @@ export async function useStoreCredit(
       usageHistory: newUsageHistory,
       updatedAt: new Date().toISOString(),
     });
-    
+
     console.log(`✅ Store credit used: ₹${usedAmount}`);
   } catch (error) {
     console.error("❌ Error using store credit:", error);
@@ -398,21 +398,22 @@ export function calculateReturnAmounts(
 } {
   const totalOriginalValue = items.reduce((sum, item) => sum + item.originalPrice, 0);
   const totalReturnValue = totalOriginalValue * 0.5; // 50% return rate
-  
+
+  // GST is calculated but not added to the credit amount
   let cgst = 0;
   let sgst = 0;
   let igst = 0;
-  
+
   if (gstType === "cgst_sgst") {
     cgst = (totalReturnValue * cgstRate) / 100;
     sgst = (totalReturnValue * sgstRate) / 100;
   } else {
     igst = (totalReturnValue * igstRate) / 100;
   }
-  
-  const totalGST = cgst + sgst + igst;
-  const totalCreditAmount = totalReturnValue + totalGST;
-  
+
+  // Total credit is just the 50% return value (no GST added)
+  const totalCreditAmount = totalReturnValue;
+
   return {
     totalOriginalValue,
     totalReturnValue,
@@ -434,18 +435,18 @@ export async function canReturnItem(
   try {
     const invoiceRef = doc(db, "shops", branch, "invoices", invoiceId);
     const invoiceDoc = await getDoc(invoiceRef);
-    
+
     if (!invoiceDoc.exists()) {
       return { canReturn: false, reason: "Invoice not found" };
     }
-    
+
     const invoiceData = invoiceDoc.data();
     const returnedBarcodes = invoiceData.returnedItemBarcodes || [];
-    
+
     if (returnedBarcodes.includes(barcode)) {
       return { canReturn: false, reason: "Item already returned" };
     }
-    
+
     return { canReturn: true };
   } catch (error) {
     console.error("❌ Error checking return eligibility:", error);

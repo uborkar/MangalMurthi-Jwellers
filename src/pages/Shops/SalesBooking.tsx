@@ -1980,9 +1980,31 @@ export default function SalesBooking() {
               </div>
             )}
 
-            {/* Save Button */}
+            {/* Save & Clear Buttons */}
             {bookingItems.length > 0 && (
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    if (window.confirm("Are you sure you want to clear the current booking?")) {
+                      clearBooking();
+                      setPartyName("");
+                      setMobileNo("");
+                      setDeliveryDate("");
+                      setSalespersonName("");
+                      setBookingItems([]);
+                      setCashAdvance(0);
+                      setNetAmount(0);
+                      setPendingAmount(0);
+                      setTotalAmount(0);
+                      setRemarks("");
+                      toast.success("Booking cleared");
+                    }
+                  }}
+                  className="px-6 py-4 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-3"
+                >
+                  <Trash2 size={24} />
+                  Clear Booking
+                </button>
                 <button
                   onClick={handleSaveBooking}
                   disabled={loading}
