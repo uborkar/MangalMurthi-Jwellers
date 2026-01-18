@@ -48,10 +48,17 @@ interface DailyExpenseEntry {
   remarks?: string;
 }
 
+interface TransactionEntry {
+  label: string;
+  description: string;
+  amount: number;
+}
+
 interface ExpenseDocument {
   date: string;
   branch: string;
   entries: DailyExpenseEntry[];
+  transactions?: TransactionEntry[];  // Transaction entries (income)
   totalExpense: number;
   totalTransaction?: number;  // Income from transactions
   balance?: number;  // Net balance (income - expense)
@@ -452,12 +459,12 @@ export default function ShopExpenseReport() {
       // Get expenses
       const expenseEntries = expenseDoc?.entries || [];
 
-      const totalIncome = transactions.reduce((sum, t) => sum + (t.amount || 0), 0);
-      const totalExpense = expenseEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
+      const totalIncome = transactions.reduce((sum: number, t: TransactionEntry) => sum + (t.amount || 0), 0);
+      const totalExpense = expenseEntries.reduce((sum: number, e: DailyExpenseEntry) => sum + (e.amount || 0), 0);
       const balance = totalIncome - totalExpense;
 
       // Transaction rows HTML
-      const transactionRows = transactions.map((t) => `
+      const transactionRows = transactions.map((t: TransactionEntry) => `
         <tr>
           <td style="border: 1px solid #000; padding: 8px; background: #ffff99; font-weight: bold;">${t.label}</td>
           <td style="border: 1px solid #000; padding: 8px; background: #ffff99;">${t.description || ''}</td>
