@@ -1,0 +1,82 @@
+// ============================================
+// CORRECTED PDF TABLE BODY (Lines 575-630)
+// Copy this and replace the existing body array in exportToPDF function
+// ============================================
+
+        body: [
+          // B2B Invoices Row
+          [
+            'B2B Invoices - 4A, 4B, 4C, 6B, 6C',
+            (b2bRecords.reduce((sum, r) => sum + r.invoices.length, 0) || 0).toString(),
+            b2bInvoiceValue > 0 ? b2bInvoiceValue.toFixed(2) : '0.00',
+            b2bTaxableValue > 0 ? b2bTaxableValue.toFixed(2) : '0.00',
+            b2bIGST > 0 ? b2bIGST.toFixed(2) : '0.00',
+            b2bCGST > 0 ? b2bCGST.toFixed(2) : '0.00',
+            b2bSGST > 0 ? b2bSGST.toFixed(2) : '0.00',
+            '0.00',
+            b2bInvoiceValue > 0 ? b2bInvoiceValue.toFixed(2) : '0.00'
+          ],
+          // B2C Large Row
+          [
+            'B2C Large - 5A, 5B',
+            (b2clRecords.reduce((sum, r) => sum + r.invoices.length, 0) || 0).toString(),
+            b2clTaxableValue > 0 ? b2clTaxableValue.toFixed(2) : '0.00',
+            b2clTaxableValue > 0 ? b2clTaxableValue.toFixed(2) : '0.00',
+            b2clIGST > 0 ? b2clIGST.toFixed(2) : '0.00',
+            '0.00',
+            '0.00',
+            '0.00',
+            (b2clTaxableValue + b2clIGST) > 0 ? (b2clTaxableValue + b2clIGST).toFixed(2) : '0.00'
+          ],
+          // B2C Small Row
+          [
+            'B2C Small - 7',
+            (b2csRecords.length || 0).toString(),
+            b2csInvoiceValue > 0 ? b2csInvoiceValue.toFixed(2) : '0.00',
+            b2csTaxableValue > 0 ? b2csTaxableValue.toFixed(2) : '0.00',
+            b2csIGST > 0 ? b2csIGST.toFixed(2) : '0.00',
+            b2csCGST > 0 ? b2csCGST.toFixed(2) : '0.00',
+            b2csSGST > 0 ? b2csSGST.toFixed(2) : '0.00',
+            '0.00',
+            b2csInvoiceValue > 0 ? b2csInvoiceValue.toFixed(2) : '0.00'
+          ],
+          // HSN Summary Row
+          [
+            'HSN Summary - 12',
+            (hsnSummary.length || 0).toString(),
+            '-',
+            hsnTaxable > 0 ? hsnTaxable.toFixed(2) : '0.00',
+            hsnIGST > 0 ? hsnIGST.toFixed(2) : '0.00',
+            hsnCGST > 0 ? hsnCGST.toFixed(2) : '0.00',
+            hsnSGST > 0 ? hsnSGST.toFixed(2) : '0.00',
+            '0.00',
+            (hsnTaxable + hsnCGST + hsnSGST + hsnIGST) > 0 ? (hsnTaxable + hsnCGST + hsnSGST + hsnIGST).toFixed(2) : '0.00'
+          ],
+          // Document Summary Row
+          [
+            'Document Summary - 13',
+            (allRecords.length || 0).toString(),
+            '-',
+            '-',
+            '-',
+            '-',
+            '-',
+            '-',
+            '-'
+          ],
+        ],
+
+// ============================================
+// HOW TO USE:
+// 1. Open src/pages/CA/GSTR1Report.tsx
+// 2. Find line 575 (search for: body: [)
+// 3. Select from "body: [" to the closing "]," (around line 630)
+// 4. Replace with the code above
+// 5. Save the file
+// ============================================
+
+// KEY FIXES:
+// - Removed ₹ symbols (jsPDF doesn't handle them well)
+// - Added conditional checks: value > 0 ? value.toFixed(2) : '0.00'
+// - Convert counts to strings: .toString()
+// - Fixed B2CL CGST/SGST to show '0.00' instead of '-'

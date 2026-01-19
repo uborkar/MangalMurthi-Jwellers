@@ -3,12 +3,14 @@ import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
-import { Calendar, Download, FileText, Store } from "lucide-react";
+import { Calendar, Download, FileText, Store, Printer } from "lucide-react";
 import { getSalesRecords, calculateGSTSummary } from "../../firebase/caReports";
 import { SalesRecord, GSTSummary } from "../../types/caReports";
 import ExcelJS from "exceljs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
-type ReportSection = "b2b" | "b2cl" | "b2cs" | "hsn" | "docs";
+type ReportSection = "summary" | "b2b" | "b2cl" | "b2cs" | "hsn" | "docs";
 
 interface B2BRecord {
   gstin: string;
@@ -46,8 +48,14 @@ interface HSNSummary {
 }
 
 export default function GSTR1Report() {
-  const [activeSection, setActiveSection] = useState<ReportSection>("b2b");
+  const [activeSection, setActiveSection] = useState<ReportSection>("summary");
   const [loading, setLoading] = useState(false);
+
+  // Period Selection - NEW
+  const [financialYear, setFinancialYear] = useState("2025-26");
+  const [periodType, setPeriodType] = useState<"monthly" | "quarterly">("monthly");
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedQuarter, setSelectedQuarter] = useState(Math.floor(new Date().getMonth() / 3));
 
   // Filters
   const [dateFrom, setDateFrom] = useState(() => {
@@ -67,6 +75,9 @@ export default function GSTR1Report() {
   const [gstSummary, setGstSummary] = useState<GSTSummary | null>(null);
 
   const shops = ["All", "Sangli", "Miraj", "Kolhapur"];
+  const months = ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"];
+  const quarters = ["Q1 (Apr-Jun)", "Q2 (Jul-Sep)", "Q3 (Oct-Dec)", "Q4 (Jan-Mar)"];
+  const financialYears = ["2023-24", "2024-25", "2025-26", "2026-27"];
 
   useEffect(() => {
     loadData();
@@ -515,6 +526,200 @@ export default function GSTR1Report() {
     }
   };
 
+  // PDF Export Function
+  const exportToPDF = async () => {
+    const loadingToast = toast.loading("Generating GSTR-1 PDF report...");
+
+    try {
+      const doc = new jsPDF('landscape');
+
+      // Header
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text('GSTR-1 - Details of Outward Supplies', 148, 15, { align: 'center' });
+
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text('MANGALMURTHI JEWELLERS', 148, 23, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text('GSTIN: 27XXXXX1234X1XX', 148, 30, { align: 'center' });
+      doc.text(`Period: ${dateFrom} to ${dateTo}`, 148, 36, { align: 'center' });
+
+      // Calculate summary data
+      const b2bTaxableValue = b2bRecords.reduce((sum, r) => sum + r.invoices.reduce((s, i) => s + i.taxableValue, 0), 0);
+      const b2bCGST = b2bRecords.reduce((sum, r) => sum + r.invoices.reduce((s, i) => s + i.cgstAmount, 0), 0);
+      const b2bSGST = b2bRecords.reduce((sum, r) => sum + r.invoices.reduce((s, i) => s + i.sgstAmount, 0), 0);
+      const b2bIGST = b2bRecords.reduce((sum, r) => sum + r.invoices.reduce((s, i) => s + i.igstAmount, 0), 0);
+      const b2bInvoiceValue = b2bRecords.reduce((sum, r) => sum + r.totalValue, 0);
+
+      const b2csTaxableValue = b2csRecords.reduce((sum, r) => sum + r.taxableValue, 0);
+      const b2csCGST = b2csRecords.reduce((sum, r) => sum + r.cgst, 0);
+      const b2csSGST = b2csRecords.reduce((sum, r) => sum + r.sgst, 0);
+      const b2csIGST = b2csRecords.reduce((sum, r) => sum + r.igst, 0);
+      const b2csInvoiceValue = b2csRecords.reduce((sum, r) => sum + r.taxableValue + r.cgst + r.sgst + r.igst, 0);
+
+      const b2clTaxableValue = b2clRecords.reduce((sum, r) => sum + r.totalValue, 0);
+      const b2clIGST = b2clRecords.reduce((sum, r) => sum + r.invoices.reduce((s, i) => s + i.igstAmount, 0), 0);
+
+      const hsnTaxable = hsnSummary.reduce((sum, h) => sum + h.taxableValue, 0);
+      const hsnCGST = hsnSummary.reduce((sum, h) => sum + h.cgst, 0);
+      const hsnSGST = hsnSummary.reduce((sum, h) => sum + h.sgst, 0);
+      const hsnIGST = hsnSummary.reduce((sum, h) => sum + h.igst, 0);
+
+      // Summary Table
+      autoTable(doc, {
+        startY: 42,
+        head: [['Particulars', 'No. of Records', 'Invoice Value', 'Taxable Value', 'IGST', 'CGST', 'SGST', 'Cess', 'Total']],
+        body: [
+          [
+            'B2B Invoices - 4A, 4B, 4C, 6B, 6C',
+            b2bRecords.reduce((sum, r) => sum + r.invoices.length, 0),
+            `₹${b2bInvoiceValue.toFixed(2)}`,
+            `₹${b2bTaxableValue.toFixed(2)}`,
+            `₹${b2bIGST.toFixed(2)}`,
+            `₹${b2bCGST.toFixed(2)}`,
+            `₹${b2bSGST.toFixed(2)}`,
+            '0.00',
+            `₹${(b2bInvoiceValue).toFixed(2)}`
+          ],
+          [
+            'B2C Large - 5A, 5B',
+            b2clRecords.reduce((sum, r) => sum + r.invoices.length, 0),
+            `₹${b2clTaxableValue.toFixed(2)}`,
+            `₹${b2clTaxableValue.toFixed(2)}`,
+            `₹${b2clIGST.toFixed(2)}`,
+            '-',
+            '-',
+            '0.00',
+            `₹${(b2clTaxableValue + b2clIGST).toFixed(2)}`
+          ],
+          [
+            'B2C Small - 7',
+            b2csRecords.length,
+            `₹${b2csInvoiceValue.toFixed(2)}`,
+            `₹${b2csTaxableValue.toFixed(2)}`,
+            `₹${b2csIGST.toFixed(2)}`,
+            `₹${b2csCGST.toFixed(2)}`,
+            `₹${b2csSGST.toFixed(2)}`,
+            '0.00',
+            `₹${b2csInvoiceValue.toFixed(2)}`
+          ],
+          [
+            'HSN Summary - 12',
+            hsnSummary.length,
+            '-',
+            `₹${hsnTaxable.toFixed(2)}`,
+            `₹${hsnIGST.toFixed(2)}`,
+            `₹${hsnCGST.toFixed(2)}`,
+            `₹${hsnSGST.toFixed(2)}`,
+            '0.00',
+            `₹${(hsnTaxable + hsnCGST + hsnSGST + hsnIGST).toFixed(2)}`
+          ],
+          [
+            'Document Summary - 13',
+            allRecords.length,
+            '-',
+            '-',
+            '-',
+            '-',
+            '-',
+            '-',
+            '-'
+          ],
+        ],
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [68, 114, 196], textColor: 255, fontStyle: 'bold', halign: 'center' },
+        columnStyles: {
+          0: { halign: 'left', cellWidth: 60 },
+          1: { halign: 'center', cellWidth: 20 },
+          2: { halign: 'right', cellWidth: 25 },
+          3: { halign: 'right', cellWidth: 25 },
+          4: { halign: 'right', cellWidth: 22 },
+          5: { halign: 'right', cellWidth: 22 },
+          6: { halign: 'right', cellWidth: 22 },
+          7: { halign: 'right', cellWidth: 18 },
+          8: { halign: 'right', cellWidth: 25 }
+        }
+      });
+
+      // B2B Details on new page
+      if (b2bRecords.length > 0) {
+        doc.addPage();
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text('B2B - Business to Business Invoices (4A, 4B, 4C)', 14, 15);
+
+        autoTable(doc, {
+          startY: 22,
+          head: [['GSTIN', 'Customer Name', 'Invoice No', 'Date', 'Invoice Value', 'Taxable Value', 'Rate', 'CGST', 'SGST', 'IGST']],
+          body: b2bRecords.flatMap(r =>
+            r.invoices.map(inv => [
+              r.gstin,
+              r.customerName,
+              inv.invoiceNumber,
+              new Date(inv.date).toLocaleDateString('en-GB'),
+              `₹${inv.totalValue.toFixed(2)}`,
+              `₹${inv.taxableValue.toFixed(2)}`,
+              `${inv.cgstRate + inv.sgstRate + inv.igstRate}%`,
+              `₹${inv.cgstAmount.toFixed(2)}`,
+              `₹${inv.sgstAmount.toFixed(2)}`,
+              `₹${inv.igstAmount.toFixed(2)}`
+            ])
+          ),
+          theme: 'striped',
+          styles: { fontSize: 7, cellPadding: 1.5 },
+          headStyles: { fillColor: [68, 114, 196], textColor: 255, fontStyle: 'bold' },
+        });
+      }
+
+      // HSN Summary on new page
+      if (hsnSummary.length > 0) {
+        doc.addPage();
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text('HSN Summary - 12', 14, 15);
+
+        autoTable(doc, {
+          startY: 22,
+          head: [['HSN Code', 'Description', 'UQC', 'Quantity', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total Tax']],
+          body: hsnSummary.map(hsn => [
+            hsn.hsnCode,
+            hsn.description,
+            hsn.uqc,
+            hsn.totalQuantity.toFixed(3),
+            `₹${hsn.taxableValue.toFixed(2)}`,
+            `₹${hsn.cgst.toFixed(2)}`,
+            `₹${hsn.sgst.toFixed(2)}`,
+            `₹${hsn.igst.toFixed(2)}`,
+            `₹${(hsn.cgst + hsn.sgst + hsn.igst).toFixed(2)}`
+          ]),
+          theme: 'striped',
+          styles: { fontSize: 8, cellPadding: 2 },
+          headStyles: { fillColor: [68, 114, 196], textColor: 255, fontStyle: 'bold' },
+        });
+      }
+
+      const monthYear = new Date(dateFrom).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+      doc.save(`GSTR1_${monthYear.replace(" ", "_")}_MangalMurthi_Jewellers.pdf`);
+
+      toast.dismiss(loadingToast);
+      toast.success("✅ PDF exported successfully!");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.dismiss(loadingToast);
+      toast.error("Failed to generate PDF report");
+    }
+  };
+
+  // Print Function
+  const handlePrint = () => {
+    window.print();
+    toast.success("Opening print dialog...");
+  };
+
   const inputStyle =
     "w-full rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] px-3 py-2 text-sm text-gray-800 dark:text-white/90 placeholder:text-gray-400 focus:border-primary focus:outline-none";
 
@@ -531,62 +736,183 @@ export default function GSTR1Report() {
             title="📊 GSTR-1 Report - Outward Supplies"
             subtitle="Complete GST Return 1 with B2B, B2CL, B2CS, and HSN Summary"
           >
-            {/* Filters */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
-              <div>
-                <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  <Calendar className="inline mr-1" size={14} />
-                  From Date
-                </label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className={inputStyle}
-                />
+            {/* Filing Status Header */}
+            <div className="mb-6 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border border-yellow-300 dark:border-yellow-700 rounded-xl shadow-sm">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">📋 Form Status</p>
+                  <p className="font-bold text-red-600 dark:text-red-400">GSTR-1 not Filed</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">🔢 ARN</p>
+                  <p className="font-semibold text-gray-700 dark:text-gray-300">N/A</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">📅 Due Date</p>
+                  <p className="font-semibold text-orange-600 dark:text-orange-400">11/02/2026</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">✅ Filing Date</p>
+                  <p className="font-semibold text-gray-700 dark:text-gray-300">N/A</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Period Selection Filters */}
+            <div className="mb-6 p-5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+              <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 mb-4">🗓️ Period Selection</h3>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                {/* Financial Year */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
+                    Financial Year
+                  </label>
+                  <select
+                    value={financialYear}
+                    onChange={(e) => setFinancialYear(e.target.value)}
+                    className={inputStyle}
+                  >
+                    {financialYears.map((fy) => (
+                      <option key={fy} value={fy}>
+                        {fy}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Period Type */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
+                    Period Type
+                  </label>
+                  <select
+                    value={periodType}
+                    onChange={(e) => setPeriodType(e.target.value as "monthly" | "quarterly")}
+                    className={inputStyle}
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                  </select>
+                </div>
+
+                {/* Month or Quarter Selection */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
+                    {periodType === "monthly" ? "Month" : "Quarter"}
+                  </label>
+                  {periodType === "monthly" ? (
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(+e.target.value)}
+                      className={inputStyle}
+                    >
+                      {months.map((month, index) => (
+                        <option key={index} value={index}>
+                          {month}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={selectedQuarter}
+                      onChange={(e) => setSelectedQuarter(+e.target.value)}
+                      className={inputStyle}
+                    >
+                      {quarters.map((quarter, index) => (
+                        <option key={index} value={index}>
+                          {quarter}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Shop Filter */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
+                    <Store className="inline mr-1" size={14} />
+                    Shop/Branch
+                  </label>
+                  <select
+                    value={shopFilter}
+                    onChange={(e) => setShopFilter(e.target.value)}
+                    className={inputStyle}
+                  >
+                    {shops.map((shop) => (
+                      <option key={shop} value={shop}>
+                        {shop}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Export Actions */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
+                    Export Options
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={exportToExcel}
+                      disabled={loading || allRecords.length === 0}
+                      className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed text-xs"
+                      title="Export to Excel"
+                    >
+                      <Download size={14} />
+                      Excel
+                    </button>
+                    <button
+                      onClick={exportToPDF}
+                      disabled={loading || allRecords.length === 0}
+                      className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed text-xs"
+                      title="Export to PDF"
+                    >
+                      <FileText size={14} />
+                      PDF
+                    </button>
+                    <button
+                      onClick={handlePrint}
+                      disabled={loading || allRecords.length === 0}
+                      className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed text-xs"
+                      title="Print"
+                    >
+                      <Printer size={14} />
+                      Print
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  <Calendar className="inline mr-1" size={14} />
-                  To Date
-                </label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-2 text-blue-800 dark:text-blue-400">
-                  <Store className="inline mr-1" size={14} />
-                  Shop
-                </label>
-                <select
-                  value={shopFilter}
-                  onChange={(e) => setShopFilter(e.target.value)}
-                  className={inputStyle}
-                >
-                  {shops.map((shop) => (
-                    <option key={shop} value={shop}>
-                      {shop}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  onClick={exportToExcel}
-                  disabled={loading || allRecords.length === 0}
-                  className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Download size={16} />
-                  Export GSTR-1
-                </button>
-              </div>
+              {/* Quick Date Range (Optional - for backward compatibility) */}
+              <details className="mt-4">
+                <summary className="text-xs text-blue-700 dark:text-blue-400 cursor-pointer font-medium">
+                  Advanced: Custom Date Range
+                </summary>
+                <div className="grid grid-cols-2 gap-4 mt-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-gray-600 dark:text-gray-400">
+                      From Date
+                    </label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className={inputStyle + " text-xs"}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-gray-600 dark:text-gray-400">
+                      To Date
+                    </label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className={inputStyle + " text-xs"}
+                    />
+                  </div>
+                </div>
+              </details>
             </div>
 
             {/* Transaction Summary - GST Portal Format */}
@@ -664,11 +990,12 @@ export default function GSTR1Report() {
             {/* Section Tabs */}
             <div className="flex gap-2 mb-6 overflow-x-auto">
               {[
-                { key: "b2b", label: "B2B", icon: "🏢" },
-                { key: "b2cl", label: "B2CL", icon: "🛍️" },
-                { key: "b2cs", label: "B2CS", icon: "📦" },
-                { key: "hsn", label: "HSN Summary", icon: "📋" },
-                { key: "docs", label: "Documents", icon: "📄" },
+                { key: "summary", label: "GSTR-1 Summary", icon: "📊" },
+                { key: "b2b", label: "B2B Invoices - 4A, 4B, 4C", icon: "🏢" },
+                { key: "b2cl", label: "B2C Large - 5A, 5B", icon: "🛍️" },
+                { key: "b2cs", label: "B2C Small - 7", icon: "📦" },
+                { key: "hsn", label: "HSN Summary - 12", icon: "📋" },
+                { key: "docs", label: "Document Summary - 13", icon: "📄" },
               ].map((section) => (
                 <button
                   key={section.key}

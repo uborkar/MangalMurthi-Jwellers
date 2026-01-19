@@ -3,10 +3,12 @@ import { useState, useEffect } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
-import { Calendar, Download, Store, TrendingUp } from "lucide-react";
+import { Calendar, Download, Store, TrendingUp, FileText, Printer, ChevronRight } from "lucide-react";
 import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import ExcelJS from "exceljs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 interface BranchData {
     branchName: string;
@@ -16,6 +18,19 @@ interface BranchData {
     totalSGST: number;
     totalIGST: number;
     totalInvoiceValue: number;
+}
+
+interface InvoiceDetail {
+    id: string;
+    invoiceId: string;
+    customerName: string;
+    createdAt: string;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    totalValue: number;
+    paymentMode?: string;
 }
 
 export default function BranchWiseBillReport() {
@@ -35,6 +50,12 @@ export default function BranchWiseBillReport() {
         igst: 0,
         totalValue: 0,
     });
+
+    // NEW: Individual branch detail view
+    const [selectedBranch, setSelectedBranch] = useState<string>("");
+    const [viewMode, setViewMode] = useState<"summary" | "detail">("summary");
+    const [branchInvoices, setBranchInvoices] = useState<InvoiceDetail[]>([]);
+    const [loadingDetails, setLoadingDetails] = useState(false);
 
     const branches = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
 

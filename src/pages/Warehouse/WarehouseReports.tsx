@@ -27,13 +27,13 @@ export default function WarehouseReports() {
   });
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
   const [allItems, setAllItems] = useState<WarehouseItem[]>([]);
-  
+
   // Detailed view state
   const [showDetailedView, setShowDetailedView] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
-  const [sortBy, setSortBy] = useState<"serial" | "date" | "status">("serial");
+  const [sortBy, setSortBy] = useState<"serial" | "date" | "status" | "name">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  
+
   // Report configuration
   const [showReportConfig, setShowReportConfig] = useState(false);
   const [reportConfig, setReportConfig] = useState<Partial<ReportConfig>>({
@@ -42,7 +42,7 @@ export default function WarehouseReports() {
     showCategoryTotals: true,
     showGrandTotal: true,
   });
-  
+
   // Filters
   const [showFilters, setShowFilters] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string>("all");
@@ -50,7 +50,7 @@ export default function WarehouseReports() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDateFrom, setFilterDateFrom] = useState<string>("");
   const [filterDateTo, setFilterDateTo] = useState<string>("");
-  
+
   const { categories } = useCategories();
   const { locations } = useLocations();
 
@@ -79,33 +79,33 @@ export default function WarehouseReports() {
       setLoading(false);
     }
   };
-  
+
   // Apply filters to items
   const getFilteredItems = () => {
     return allItems.filter((item) => {
       // Category filter
       if (filterCategory !== "all" && item.category !== filterCategory) return false;
-      
+
       // Location filter
       if (filterLocation !== "all" && item.location !== filterLocation) return false;
-      
+
       // Status filter
       if (filterStatus !== "all" && item.status !== filterStatus) return false;
-      
+
       // Date range filter
       if (filterDateFrom) {
         const itemDate = new Date(item.taggedAt);
         const fromDate = new Date(filterDateFrom);
         if (itemDate < fromDate) return false;
       }
-      
+
       if (filterDateTo) {
         const itemDate = new Date(item.taggedAt);
         const toDate = new Date(filterDateTo);
         toDate.setHours(23, 59, 59, 999); // End of day
         if (itemDate > toDate) return false;
       }
-      
+
       return true;
     });
   };
@@ -116,7 +116,7 @@ export default function WarehouseReports() {
 
     try {
       const filteredItems = getFilteredItems();
-      
+
       if (filteredItems.length === 0) {
         toast.dismiss(loadingToast);
         toast.error("No items to export with current filters");
@@ -181,7 +181,7 @@ export default function WarehouseReports() {
       toast.error("Failed to generate report");
     }
   };
-  
+
   const clearFilters = () => {
     setFilterCategory("all");
     setFilterLocation("all");
@@ -190,14 +190,14 @@ export default function WarehouseReports() {
     setFilterDateTo("");
     toast.success("Filters cleared");
   };
-  
+
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => ({
       ...prev,
       [category]: !prev[category]
     }));
   };
-  
+
   const toggleAllCategories = (expand: boolean) => {
     const newState: Record<string, boolean> = {};
     Object.keys(categoryCounts).forEach(cat => {
@@ -205,23 +205,28 @@ export default function WarehouseReports() {
     });
     setExpandedCategories(newState);
   };
-  
+
   const getSortedItems = (items: WarehouseItem[]) => {
     return [...items].sort((a, b) => {
       let comparison = 0;
-      
-      if (sortBy === "serial") {
+
+      if (sortBy === "name") {
+        // Alphabetical sorting by item name (stored in 'remark' field)
+        const nameA = (a.remark || a.barcode || '').toLowerCase();
+        const nameB = (b.remark || b.barcode || '').toLowerCase();
+        comparison = nameA.localeCompare(nameB);
+      } else if (sortBy === "serial") {
         comparison = a.serial - b.serial;
       } else if (sortBy === "date") {
         comparison = new Date(a.taggedAt).getTime() - new Date(b.taggedAt).getTime();
       } else if (sortBy === "status") {
         comparison = a.status.localeCompare(b.status);
       }
-      
+
       return sortOrder === "asc" ? comparison : -comparison;
     });
   };
-  
+
   const getStatusColor = (status: ItemStatus) => {
     const colors = {
       tagged: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
@@ -237,7 +242,7 @@ export default function WarehouseReports() {
   const totalItems = Object.values(statusCounts).reduce((a, b) => a + b, 0);
   const filteredItems = getFilteredItems();
   const filteredCount = filteredItems.length;
-  
+
   // Group filtered items by category
   const itemsByCategory = filteredItems.reduce((acc, item) => {
     const category = item.category || "Uncategorized";
@@ -266,7 +271,7 @@ export default function WarehouseReports() {
                 <Download size={18} />
                 Professional Report
               </button>
-              
+
               <button
                 onClick={() => exportProfessionalReport("stock")}
                 className="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
@@ -275,7 +280,7 @@ export default function WarehouseReports() {
                 <Package size={18} />
                 Stock Report
               </button>
-              
+
               <button
                 onClick={() => exportProfessionalReport("distribution")}
                 className="px-5 py-2.5 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
@@ -284,7 +289,7 @@ export default function WarehouseReports() {
                 <Truck size={18} />
                 Distribution Report
               </button>
-              
+
               <button
                 onClick={() => exportProfessionalReport("balance")}
                 className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
@@ -293,7 +298,7 @@ export default function WarehouseReports() {
                 <FileSpreadsheet size={18} />
                 Balance Report
               </button>
-              
+
               <button
                 onClick={() => setShowReportConfig(!showReportConfig)}
                 className="px-5 py-2.5 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
@@ -301,7 +306,7 @@ export default function WarehouseReports() {
                 <Settings size={18} />
                 Report Settings
               </button>
-              
+
               <button
                 onClick={() => setShowFilters(!showFilters)}
                 className="px-5 py-2.5 bg-gray-500 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2 ml-auto"
@@ -315,13 +320,13 @@ export default function WarehouseReports() {
             {showReportConfig && (
               <div className="mb-6 p-5 rounded-xl border border-indigo-300 bg-indigo-50 dark:bg-indigo-900/20 dark:border-indigo-700">
                 <h3 className="font-bold mb-4 text-indigo-900 dark:text-indigo-100">⚙️ Report Configuration</h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div>
                     <label className="text-sm block mb-1 font-medium text-indigo-800 dark:text-indigo-200">Group By</label>
                     <select
                       value={reportConfig.groupBy}
-                      onChange={(e) => setReportConfig({...reportConfig, groupBy: e.target.value as any})}
+                      onChange={(e) => setReportConfig({ ...reportConfig, groupBy: e.target.value as any })}
                       className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600"
                     >
                       <option value="category">Category</option>
@@ -336,7 +341,7 @@ export default function WarehouseReports() {
                       type="checkbox"
                       id="showSummary"
                       checked={reportConfig.showSummary}
-                      onChange={(e) => setReportConfig({...reportConfig, showSummary: e.target.checked})}
+                      onChange={(e) => setReportConfig({ ...reportConfig, showSummary: e.target.checked })}
                       className="w-4 h-4"
                     />
                     <label htmlFor="showSummary" className="text-sm font-medium text-indigo-800 dark:text-indigo-200">
@@ -349,7 +354,7 @@ export default function WarehouseReports() {
                       type="checkbox"
                       id="showCategoryTotals"
                       checked={reportConfig.showCategoryTotals}
-                      onChange={(e) => setReportConfig({...reportConfig, showCategoryTotals: e.target.checked})}
+                      onChange={(e) => setReportConfig({ ...reportConfig, showCategoryTotals: e.target.checked })}
                       className="w-4 h-4"
                     />
                     <label htmlFor="showCategoryTotals" className="text-sm font-medium text-indigo-800 dark:text-indigo-200">
@@ -362,7 +367,7 @@ export default function WarehouseReports() {
                       type="checkbox"
                       id="showGrandTotal"
                       checked={reportConfig.showGrandTotal}
-                      onChange={(e) => setReportConfig({...reportConfig, showGrandTotal: e.target.checked})}
+                      onChange={(e) => setReportConfig({ ...reportConfig, showGrandTotal: e.target.checked })}
                       className="w-4 h-4"
                     />
                     <label htmlFor="showGrandTotal" className="text-sm font-medium text-indigo-800 dark:text-indigo-200">
@@ -373,7 +378,7 @@ export default function WarehouseReports() {
 
                 <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded-lg">
                   <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                    <strong>💡 Professional Features:</strong> Reports include company header, summary statistics, 
+                    <strong>💡 Professional Features:</strong> Reports include company header, summary statistics,
                     category-wise grouping with totals, formatted tables, and grand totals. All controlled through code!
                   </p>
                 </div>
@@ -384,7 +389,7 @@ export default function WarehouseReports() {
             {showFilters && (
               <div className="mb-6 p-5 rounded-xl border border-gray-300 bg-white dark:bg-gray-900 dark:border-gray-700">
                 <h3 className="font-bold mb-4 text-gray-800 dark:text-white">🔍 Filter Options</h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                   <div>
                     <label className="text-sm block mb-1 font-medium text-gray-700 dark:text-gray-300">Category</label>
@@ -606,7 +611,7 @@ export default function WarehouseReports() {
                 <Package size={18} />
                 {showDetailedView ? "Hide Detailed View" : "Show Detailed View"}
               </button>
-              
+
               {showDetailedView && (
                 <>
                   <div className="flex gap-2">
@@ -623,7 +628,7 @@ export default function WarehouseReports() {
                       Collapse All
                     </button>
                   </div>
-                  
+
                   <div className="flex gap-2 items-center ml-auto">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Sort by:</label>
                     <select
@@ -631,11 +636,12 @@ export default function WarehouseReports() {
                       onChange={(e) => setSortBy(e.target.value as any)}
                       className="px-3 py-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 text-sm"
                     >
+                      <option value="name">Item Name (A-Z)</option>
                       <option value="serial">Serial Number</option>
                       <option value="date">Date</option>
                       <option value="status">Status</option>
                     </select>
-                    
+
                     <select
                       value={sortOrder}
                       onChange={(e) => setSortOrder(e.target.value as any)}
@@ -664,7 +670,7 @@ export default function WarehouseReports() {
                     .map(([category, items]) => {
                       const isExpanded = expandedCategories[category] ?? true;
                       const sortedItems = getSortedItems(items);
-                      
+
                       // Calculate category statistics
                       const categoryStats = {
                         total: items.length,
@@ -802,7 +808,7 @@ export default function WarehouseReports() {
                                   ))}
                                 </tbody>
                               </table>
-                              
+
                               {sortedItems.length > 50 && (
                                 <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-white/5 border-t border-gray-200 dark:border-gray-800">
                                   Showing all {sortedItems.length} items in this category

@@ -194,10 +194,10 @@ export class WarehouseReportGenerator {
         groupKey === "category"
           ? item.category
           : groupKey === "location"
-          ? item.location
-          : groupKey === "status"
-          ? item.status
-          : "All";
+            ? item.location
+            : groupKey === "status"
+              ? item.status
+              : "All";
 
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(item);
@@ -377,8 +377,15 @@ export class WarehouseReportGenerator {
       // Column Headers
       row = this.addColumnHeaders(sheet, row);
 
-      // Items
-      group.items.forEach((item, itemIndex) => {
+      // ✅ Sort items alphabetically by name (stored in 'remark' field)
+      const sortedItems = [...group.items].sort((a, b) => {
+        const nameA = (a.remark || a.barcode || '').toLowerCase();
+        const nameB = (b.remark || b.barcode || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+
+      // Items (now in alphabetical order)
+      sortedItems.forEach((item, itemIndex) => {
         row = this.addItemRow(sheet, row, item, itemIndex);
       });
 
@@ -600,8 +607,7 @@ export async function generateWarehouseReport(
   config: Partial<ReportConfig> = {}
 ): Promise<void> {
   const generator = new WarehouseReportGenerator(items, config);
-  const filename = `${config.title || "Warehouse_Report"}_${
-    new Date().toISOString().split("T")[0]
-  }.xlsx`;
+  const filename = `${config.title || "Warehouse_Report"}_${new Date().toISOString().split("T")[0]
+    }.xlsx`;
   await generator.downloadAsExcel(filename);
 }
