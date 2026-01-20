@@ -59,6 +59,8 @@ export default function App() {
           <ScrollToTop />
           <Toaster
             position="top-right"
+            limit={3}  // 🔥 Only show max 3 toasts at once
+            reverseOrder={false}  // 🔥 Newest on top
             toastOptions={{
               style: {
                 zIndex: 99999,

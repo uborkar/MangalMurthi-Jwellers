@@ -1,5 +1,5 @@
 // src/pages/Warehouse/WarehouseReports.tsx - Warehouse Reports & Analytics
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
@@ -54,8 +54,14 @@ export default function WarehouseReports() {
   const { categories } = useCategories();
   const { locations } = useLocations();
 
+  // Prevent duplicate loading on mount
+  const hasLoadedRef = useRef(false);
+
   useEffect(() => {
-    loadReports();
+    if (!hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      loadReports();
+    }
   }, []);
 
   const loadReports = async () => {

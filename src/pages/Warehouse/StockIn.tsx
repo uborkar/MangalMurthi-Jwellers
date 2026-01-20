@@ -1,5 +1,5 @@
 // src/pages/Warehouse/StockIn.tsx - NEW: Unified System with Barcode Scanning
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
@@ -42,24 +42,30 @@ export default function StockIn() {
   const [scannerEnabled, setScannerEnabled] = useState(false);
   const [scannedQueue, setScannedQueue] = useState<WarehouseItem[]>([]);
 
+  // Prevent duplicate loading on mount
+  const hasLoadedRef = useRef(false);
+
   // Load tagged items - SIMPLE FLAT STRUCTURE
   useEffect(() => {
-    loadTaggedItems();
-    loadStatusCounts();
+    if (!hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      loadTaggedItems();
+      loadStatusCounts();
+    }
   }, []);
 
   const loadTaggedItems = async () => {
     setLoading(true);
     try {
       console.log("🔍 Loading items with status: 'printed' from warehouseItems collection");
-      
+
       const items = await getItemsByStatus("printed");
 
       console.log(`✅ Query returned ${items.length} items`);
       if (items.length > 0) {
         console.log("📦 First 3 items:", items.slice(0, 3));
       }
-      
+
       setTaggedItems(items);
 
       if (items.length === 0) {
@@ -458,8 +464,8 @@ export default function StockIn() {
                 <button
                   onClick={() => setScannerEnabled(!scannerEnabled)}
                   className={`px-4 py-2 rounded-lg font-medium transition-colors ${scannerEnabled
-                      ? "bg-indigo-500 text-white hover:bg-indigo-600"
-                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                    ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                    : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
                     }`}
                 >
                   {scannerEnabled ? "Scanner Active" : "Enable Scanner"}
