@@ -49,6 +49,7 @@ import AppSettingsPage from "./pages/Settings/AppSettings";
 import { AuthProvider } from "./context/AuthContext";
 import { ShopProvider } from "./context/ShopContext";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
+import TestBarcodeScanner from "./pages/TestBarcodeScanner";
 
 
 export default function App() {
@@ -150,6 +151,7 @@ export default function App() {
               <Route path="/settings" element={<AppSettingsPage />} />
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/blank" element={<Blank />} />
+              <Route path="/test-barcode-scanner" element={<TestBarcodeScanner />} />
 
               {/* Forms */}
               <Route path="/form-elements" element={<FormElements />} />
