@@ -74,7 +74,7 @@ export const useToast = () => {
          * Show loading toast (gray with spinner)
          * Returns toast ID that can be used to dismiss it
          */
-        loading: (message: string, options = {}) =>
+        loading: (message: string, options: any = {}) =>
             toast.loading(message, {
                 ...options,
                 id: options.id || `loading-${message.substring(0, 20)}`,

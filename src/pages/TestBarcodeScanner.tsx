@@ -59,8 +59,8 @@ export default function TestBarcodeScanner() {
                                 <button
                                     onClick={() => setScanMode(!scanMode)}
                                     className={`px-4 py-2 rounded-lg font-medium transition-colors ${scanMode
-                                            ? "bg-green-500 hover:bg-green-600 text-white"
-                                            : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                                        ? "bg-green-500 hover:bg-green-600 text-white"
+                                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
                                         }`}
                                 >
                                     {scanMode ? "✓ Scanner ON" : "Enable Scanner"}
@@ -201,8 +201,10 @@ export default function TestBarcodeScanner() {
                 </div>
             </div>
 
+
             {/* Print Styles */}
-            <style jsx>{`
+            <style dangerouslySetInnerHTML={{
+                __html: `
         @media print {
           .no-print {
             display: none !important;
@@ -220,7 +222,7 @@ export default function TestBarcodeScanner() {
             page-break-inside: avoid;
           }
         }
-      `}</style>
+      `}} />
         </>
     );
 }

@@ -60,15 +60,12 @@ export default function App() {
           <ScrollToTop />
           <Toaster
             position="top-right"
-            limit={3}  // 🔥 Only show max 3 toasts at once
-            reverseOrder={false}  // 🔥 Newest on top
             toastOptions={{
               style: {
                 zIndex: 99999,
                 marginTop: '70px',
               },
               duration: 4000,
-              // Prevent duplicate toasts
               success: {
                 duration: 3000,
               },
@@ -76,11 +73,9 @@ export default function App() {
                 duration: 4000,
               },
             }}
-            // Prevent showing the same toast twice
             containerStyle={{
               top: 70,
             }}
-            // De-duplicate toasts by content
             gutter={8}
           />
           <Routes>
