@@ -1,5 +1,4 @@
-// src/components/common/BarcodePrintSheet.tsx - PROFESSIONAL Thermal Label (100mm x 15mm)
-// Matches EXACT format from product images - Clean, Vertical Layout
+// src/components/common/BarcodePrintSheet.tsx - PREMIUM Thermal Label Preview
 import BarcodeView from "./BarcodeView";
 
 interface PrintItem {
@@ -19,315 +18,301 @@ interface Props {
 export default function BarcodePrintSheet({ items }: Props) {
   return (
     <>
-      {/* Thermal Labels Container */}
-      <div className="thermal-labels-wrapper">
-        {items.map((item, index) => (
-          <div key={index} className="thermal-label-page">
-            {/* PROFESSIONAL VERTICAL LAYOUT - Like Product Image */}
-            <div className="label-content">
-
-              {/* Top Section - Item Details (Vertical Stack) */}
-              <div className="label-header">
-                <div className="category-name">{item.category.toUpperCase()}</div>
-                {item.remark && (
-                  <div className="item-description">{item.remark}</div>
-                )}
-              </div>
-
-              {/* Middle Section - Metadata */}
-              <div className="label-metadata">
-                <div className="meta-row">
-                  <span className="meta-label">Item:</span>
-                  <span className="meta-value">#{item.serial}</span>
+      {/* 
+          SCREEM PREVIEW CONTAINER 
+          This design simulates a physical thermal roll for a "WOW" effect
+      */}
+      <div className="roll-visualization no-print">
+        <div className="roll-top"></div>
+        <div className="thermal-roll">
+          {items.map((item, index) => (
+            <div key={index} className="preview-label-container">
+              <div className="thermal-label-preview">
+                {/* Physical Label Shape Visualization */}
+                <div className="label-shape-overlay">
+                  <div className="tag-loop"></div>
+                  <div className="tag-body">
+                    <div className="tag-content">
+                      <div className="tag-left">
+                        <div className="tag-category">{item.category.toUpperCase()}</div>
+                        <div className="tag-remark">{item.remark || "Jewellery Item"}</div>
+                        <div className="tag-meta">
+                          <span>SN: #{item.serial}</span>
+                          {item.design && <span>• {item.design}</span>}
+                        </div>
+                      </div>
+                      <div className="tag-right">
+                        <div className="tag-barcode-container">
+                          <BarcodeView
+                            value={item.barcodeValue}
+                            height={28}
+                            width={1.4}
+                            displayValue={true}
+                            fontSize={8}
+                            margin={0}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                {item.design && (
-                  <div className="meta-row">
-                    <span className="meta-label">Design:</span>
-                    <span className="meta-value">{item.design}</span>
-                  </div>
-                )}
-                {item.type && (
-                  <div className="meta-row">
-                    <span className="meta-label">Type:</span>
-                    <span className="meta-value">{item.type}</span>
-                  </div>
-                )}
               </div>
+              {/* This represents the perforation/gap between labels */}
+              {index < items.length - 1 && <div className="perforation"></div>}
+            </div>
+          ))}
+        </div>
+        <div className="roll-bottom"></div>
+      </div>
 
-              {/* Bottom Section - Barcode (Full Width) */}
-              <div className="label-barcode-section">
-                <BarcodeView
-                  value={item.barcodeValue}
-                  height={30}
-                  width={2}
-                  displayValue={true}
-                  fontSize={10}
-                  margin={2}
-                />
+      {/* 
+          ACTUAL PRINTING CONTAINER 
+          This is what the printer sees - strictly 100mm x 15mm
+      */}
+      <div className="print-only-container">
+        {items.map((item, index) => (
+          <div key={`print-${index}`} className="strict-thermal-label">
+            <div className="print-label-inner">
+              <div className="print-left">
+                <div className="print-category">{item.category.toUpperCase()}</div>
+                <div className="print-remark">{item.remark || "Jewellery Item"}</div>
+                <div className="print-meta">
+                  <span>SN: #{item.serial}</span>
+                  {item.design && <span> • {item.design}</span>}
+                </div>
+              </div>
+              <div className="print-right">
+                <div className="print-barcode">
+                  <BarcodeView
+                    value={item.barcodeValue}
+                    height={32}
+                    width={1.6}
+                    displayValue={true}
+                    fontSize={10}
+                    margin={0}
+                  />
+                </div>
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* PROFESSIONAL THERMAL LABEL STYLES */}
       <style jsx>{`
         /* ================================================
-           SCREEN PREVIEW - Shows labels in queue
+           SCREEN PREVIEW STYLES (PREMIUM ROLL VIEW)
            ================================================ */
-        .thermal-labels-wrapper {
-          width: 100%;
-          max-width: 100mm;
-          margin: 0 auto;
-          background: #f8f9fa;
+        .roll-visualization {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 40px 20px;
+          perspective: 1000px;
+          background: #f0f2f5;
+          min-height: 80vh;
+        }
+
+        .thermal-roll {
+          width: 500px; /* Wider for web visual but internal labels are correctly scaled */
+          background: #ffffff;
+          box-shadow: 0 20px 50px rgba(0,0,0,0.1), inset 0 0 20px rgba(0,0,0,0.02);
+          position: relative;
+          z-index: 2;
+          border-left: 1px solid #e0e0e0;
+          border-right: 1px solid #e0e0e0;
+        }
+
+        .roll-top {
+          width: 500px;
+          height: 30px;
+          background: linear-gradient(to bottom, #d1d5db, #ffffff);
+          border-radius: 250px / 15px;
+          margin-bottom: -15px;
+          z-index: 3;
+          box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        }
+
+        .roll-bottom {
+          width: 500px;
+          height: 40px;
+          background: linear-gradient(to top, #d1d5db, #ffffff);
+          border-radius: 250px / 20px;
+          margin-top: -20px;
+          z-index: 1;
+        }
+
+        .preview-label-container {
+          padding: 20px 40px;
+          transition: all 0.3s ease;
+        }
+
+        .thermal-label-preview {
+          background: #fff;
+          border: 1px dashed #ced4da;
           padding: 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 5mm;
+          border-radius: 4px;
+          transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
-        .thermal-label-page {
-          width: 100mm;
-          height: 15mm;
+        .preview-label-container:hover .thermal-label-preview {
+          transform: scale(1.02) translateX(5px);
+          box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+          border-color: #3b82f6;
+          border-style: solid;
+        }
+
+        /* Jewellery Item Tag Specific Visualization */
+        .label-shape-overlay {
+          display: flex;
+          align-items: center;
+        }
+
+        .tag-loop {
+          width: 60px;
+          height: 12px;
+          background: #f3f4f6;
+          border: 1px solid #e5e7eb;
+          border-radius: 6px 0 0 6px;
+          border-right: none;
+          position: relative;
+        }
+
+        .tag-loop::after {
+          content: "";
+          position: absolute;
+          right: -4px;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 8px;
+          height: 8px;
+          background: #fff;
+          border-radius: 50%;
+          border: 1px solid #e5e7eb;
+        }
+
+        .tag-body {
+          flex: 1;
+          height: 60px;
           background: white;
-          border: 1px solid #dee2e6;
-          border-radius: 2mm;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          page-break-after: always;
-          page-break-inside: avoid;
-          overflow: hidden;
+          border: 1px solid #e5e7eb;
+          border-radius: 0 8px 8px 0;
+          box-shadow: 2px 2px 5px rgba(0,0,0,0.02);
+          padding: 10px 15px;
+          display: flex;
+          align-items: center;
         }
 
-        .label-content {
-          width: 100%;
-          height: 100%;
+        .tag-content {
           display: flex;
-          flex-direction: column;
           justify-content: space-between;
-          padding: 1.5mm 3mm;
-          box-sizing: border-box;
+          width: 100%;
+          align-items: center;
         }
 
-        /* HEADER - Category & Description */
-        .label-header {
-          display: flex;
-          flex-direction: column;
-          gap: 0.5mm;
+        .tag-category {
+          font-weight: 800;
+          font-size: 14px;
+          color: #1f2937;
+          letter-spacing: 0.5px;
         }
 
-        .category-name {
-          font-size: 9pt;
-          font-weight: 700;
-          color: #000;
-          letter-spacing: 0.3pt;
-          line-height: 1;
-          text-transform: uppercase;
+        .tag-remark {
+          font-size: 11px;
+          color: #4b5563;
+          margin-top: 2px;
         }
 
-        .item-description {
-          font-size: 7pt;
-          color: #333;
-          line-height: 1.1;
-          font-weight: 500;
+        .tag-meta {
+          font-size: 9px;
+          color: #9ca3af;
+          margin-top: 4px;
+          font-family: monospace;
         }
 
-        /* METADATA - Item Info */
-        .label-metadata {
-          display: flex;
-          gap: 3mm;
-          font-size: 6pt;
-          color: #666;
-          line-height: 1;
+        .tag-right {
+           margin-left: 20px;
         }
 
-        .meta-row {
-          display: flex;
-          gap: 1mm;
-          align-items: baseline;
-        }
-
-        .meta-label {
-          color: #888;
-          font-weight: 400;
-        }
-
-        .meta-value {
-          color: #333;
-          font-weight: 600;
-        }
-
-        /* BARCODE SECTION - Full Width */
-        .label-barcode-section {
-          display: flex;
-          justify-content: center;
-          align-items: flex-end;
-          margin-top: auto;
-        }
-
-        .label-barcode-section svg {
-          max-width: 94mm;
-          height: auto;
-        }
-
-        /* Hover effect on screen */
-        .thermal-label-page:hover {
-          border-color: #007bff;
-          box-shadow: 0 2px 8px rgba(0,123,255,0.15);
-          transform: translateY(-1px);
-          transition: all 0.2s ease;
+        .perforation {
+          height: 1px;
+          border-top: 2px dotted #e5e7eb;
+          margin-top: 20px;
+          width: 100%;
         }
 
         /* ================================================
-           PRINT STYLES - CRITICAL FOR THERMAL PRINTER
+           ACTUAL PRINT STYLES (STRICT 100mm x 15mm)
            ================================================ */
+        .print-only-container {
+          display: none;
+        }
+
         @media print {
-          /* Reset everything */
-          * {
-            margin: 0 !important;
-            padding: 0 !important;
-            box-sizing: border-box !important;
-          }
-
-          html, body {
-            width: 100mm !important;
-            height: auto !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-
-          /* Hide everything except labels */
-          body > *:not(.thermal-labels-wrapper) {
+          .no-print {
             display: none !important;
           }
 
-          /* Labels wrapper - vertical queue */
-          .thermal-labels-wrapper {
+          .print-only-container {
             display: block !important;
-            width: 100mm !important;
             margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
-            gap: 0 !important;
           }
 
-          /* Individual Label Page - EXACT 100mm x 15mm */
-          .thermal-label-page {
+          .strict-thermal-label {
             width: 100mm !important;
             height: 15mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            border: none !important;
-            border-radius: 0 !important;
-            box-shadow: none !important;
-            background: white !important;
             display: block !important;
-            page-break-before: auto !important;
             page-break-after: always !important;
-            page-break-inside: avoid !important;
-          }
-
-          /* Last label - no page break */
-          .thermal-label-page:last-child {
-            page-break-after: avoid !important;
-          }
-
-          /* Label Content Container */
-          .label-content {
-            width: 100mm !important;
-            height: 15mm !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: space-between !important;
-            padding: 1.5mm 3mm !important;
+            overflow: hidden !important;
             box-sizing: border-box !important;
-            background: white !important;
+            padding: 0 3mm !important;
+            background: #fff !important;
           }
 
-          /* HEADER Section */
-          .label-header {
+          .print-label-inner {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            height: 100% !important;
+            width: 100% !important;
+          }
+
+          .print-left {
+            flex: 1 !important;
             display: flex !important;
             flex-direction: column !important;
-            gap: 0.5mm !important;
-            flex-shrink: 0 !important;
-          }
-
-          .category-name {
-            font-family: 'Arial', 'Helvetica', sans-serif !important;
-            font-size: 9pt !important;
-            font-weight: 700 !important;
-            color: #000 !important;
-            letter-spacing: 0.3pt !important;
-            line-height: 1 !important;
-            text-transform: uppercase !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          .item-description {
-            font-family: 'Arial', 'Helvetica', sans-serif !important;
-            font-size: 7pt !important;
-            color: #000 !important;
-            line-height: 1.1 !important;
-            font-weight: 500 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          /* METADATA Section */
-          .label-metadata {
-            display: flex !important;
-            gap: 3mm !important;
-            font-size: 6pt !important;
-            line-height: 1 !important;
-            flex-shrink: 0 !important;
-          }
-
-          .meta-row {
-            display: flex !important;
-            gap: 1mm !important;
-            align-items: baseline !important;
-          }
-
-          .meta-label {
-            font-family: 'Arial', 'Helvetica', sans-serif !important;
-            color: #666 !important;
-            font-weight: 400 !important;
-          }
-
-          .meta-value {
-            font-family: 'Arial', 'Helvetica', sans-serif !important;
-            color: #000 !important;
-            font-weight: 600 !important;
-          }
-
-          /* BARCODE Section - Full Width */
-          .label-barcode-section {
-            display: flex !important;
             justify-content: center !important;
-            align-items: flex-end !important;
-            margin-top: auto !important;
-            flex-shrink: 0 !important;
-            height: 7mm !important;
           }
 
-          .label-barcode-section svg {
-            max-width: 94mm !important;
-            height: 6mm !important;
-            display: block !important;
+          .print-category {
+            font-size: 10pt !important;
+            font-weight: 900 !important;
+            line-height: 1 !important;
+            color: #000 !important;
+            margin-bottom: 0.5mm !important;
           }
 
-          /* Page Setup - CRITICAL for thermal printer */
+          .print-remark {
+            font-size: 8pt !important;
+            line-height: 1 !important;
+            color: #000 !important;
+            margin-bottom: 0.5mm !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+          }
+
+          .print-meta {
+            font-size: 6.5pt !important;
+            color: #000 !important;
+            font-family: 'Courier New', Courier, monospace !important;
+          }
+
+          .print-right {
+            margin-left: 2mm !important;
+          }
+
           @page {
             size: 100mm 15mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          /* First page settings */
-          @page :first {
             margin: 0 !important;
           }
         }
