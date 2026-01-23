@@ -1,4 +1,4 @@
-// src/components/common/BarcodePrintSheet.tsx - PREMIUM Thermal Label Preview
+// src/components/common/BarcodePrintSheet.tsx - OPTIMIZED JEWELLERY TAG (55mm Printable Area)
 import BarcodeView from "./BarcodeView";
 
 interface PrintItem {
@@ -19,231 +19,164 @@ export default function BarcodePrintSheet({ items }: Props) {
   return (
     <>
       {/* 
-          SCREEM PREVIEW CONTAINER 
-          This design simulates a physical thermal roll for a "WOW" effect
+          REFINED SCREEN PREVIEW - Small Standard Size
       */}
-      <div className="roll-visualization no-print">
-        <div className="roll-top"></div>
-        <div className="thermal-roll">
-          {items.map((item, index) => (
-            <div key={index} className="preview-label-container">
-              <div className="thermal-label-preview">
-                {/* Physical Label Shape Visualization */}
-                <div className="label-shape-overlay">
-                  <div className="tag-loop"></div>
-                  <div className="tag-body">
-                    <div className="tag-content">
-                      <div className="tag-left">
-                        <div className="tag-category">{item.category.toUpperCase()}</div>
-                        <div className="tag-remark">{item.remark || "Jewellery Item"}</div>
-                        <div className="tag-meta">
-                          <span>SN: #{item.serial}</span>
-                          {item.design && <span>• {item.design}</span>}
-                        </div>
-                      </div>
-                      <div className="tag-right">
-                        <div className="tag-barcode-container">
-                          <BarcodeView
-                            value={item.barcodeValue}
-                            height={28}
-                            width={1.4}
-                            displayValue={true}
-                            fontSize={8}
-                            margin={0}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+      <div className="barcodes-grid no-print">
+        {items.map((item, index) => (
+          <div key={index} className="jewellery-tag-preview">
+            <div className="preview-body">
+              {/* Left Side: Info */}
+              <div className="preview-section preview-left">
+                <div className="preview-field">T: {item.type || "-"}</div>
+                <div className="preview-field">D: {item.design || "-"}</div>
+                <div className="preview-field">L: {item.location || "-"}</div>
               </div>
-              {/* This represents the perforation/gap between labels */}
-              {index < items.length - 1 && <div className="perforation"></div>}
+
+              <div className="preview-fold"></div>
+
+              {/* Right Side: Barcode (Shrinked) */}
+              <div className="preview-section preview-right">
+                <div className="preview-cat">{item.category}</div>
+                <div className="preview-barcode-box">
+                  <BarcodeView
+                    value={item.barcodeValue}
+                    height={20}
+                    width={0.8} // Shrinked width
+                    displayValue={false}
+                  />
+                </div>
+                <div className="preview-val">{item.barcodeValue}</div>
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="roll-bottom"></div>
+            {/* Tail/Bridge */}
+            <div className="preview-tail"></div>
+          </div>
+        ))}
       </div>
 
       {/* 
-          ACTUAL PRINTING CONTAINER 
-          This is what the printer sees - strictly 100mm x 15mm
+          STRICT PRINTING LAYOUT - 100mm total, 55mm body
       */}
-      <div className="print-only-container">
+      <div className="print-actual-container">
         {items.map((item, index) => (
-          <div key={`print-${index}`} className="strict-thermal-label">
-            <div className="print-label-inner">
-              <div className="print-left">
-                <div className="print-category">{item.category.toUpperCase()}</div>
-                <div className="print-remark">{item.remark || "Jewellery Item"}</div>
-                <div className="print-meta">
-                  <span>SN: #{item.serial}</span>
-                  {item.design && <span> • {item.design}</span>}
-                </div>
+          <div key={`print-${index}`} className="print-tag-page">
+            <div className="print-tag-body">
+              {/* LEFT FLAP (Approx 26mm) */}
+              <div className="print-section print-left">
+                <div className="print-field">T: {item.type || "-"}</div>
+                <div className="print-field">D: {item.design || "-"}</div>
+                <div className="print-field">L: {item.location || "-"}</div>
               </div>
-              <div className="print-right">
+
+              {/* CENTER FOLD GAP (Approx 3mm) */}
+              <div className="print-fold-gap"></div>
+
+              {/* RIGHT FLAP (Approx 26mm) */}
+              <div className="print-section print-right">
+                <div className="print-cat">{item.category}</div>
                 <div className="print-barcode">
                   <BarcodeView
                     value={item.barcodeValue}
-                    height={32}
-                    width={1.6}
-                    displayValue={true}
-                    fontSize={10}
-                    margin={0}
+                    height={28}
+                    width={0.8} // Shrinked width for printing too
+                    displayValue={false}
                   />
                 </div>
+                <div className="print-val">{item.barcodeValue}</div>
               </div>
             </div>
+            {/* TAIL (45mm) - Usually blank or used for wrapping */}
+            <div className="print-tag-tail"></div>
           </div>
         ))}
       </div>
 
       <style jsx>{`
         /* ================================================
-           SCREEN PREVIEW STYLES (PREMIUM ROLL VIEW)
+           SCREEN PREVIEW STYLES (SMALL STANDARD)
            ================================================ */
-        .roll-visualization {
+        .barcodes-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 15px;
+          justify-content: center;
+        }
+
+        .jewellery-tag-preview {
+          width: 380px; /* Small standard preview width */
+          height: 80px;
+          display: flex;
+          align-items: center;
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 4px;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+          padding: 5px;
+        }
+
+        .preview-body {
+          width: 55%; /* Representing the 55mm printable area */
+          height: 100%;
+          display: flex;
+          border: 1px dashed #cbd5e1;
+          border-radius: 2px;
+        }
+
+        .preview-section {
+          flex: 1;
           display: flex;
           flex-direction: column;
-          align-items: center;
-          padding: 40px 20px;
-          perspective: 1000px;
-          background: #f0f2f5;
-          min-height: 80vh;
+          justify-content: center;
+          padding: 0 5px;
+          overflow: hidden;
         }
 
-        .thermal-roll {
-          width: 500px; /* Wider for web visual but internal labels are correctly scaled */
-          background: #ffffff;
-          box-shadow: 0 20px 50px rgba(0,0,0,0.1), inset 0 0 20px rgba(0,0,0,0.02);
-          position: relative;
-          z-index: 2;
-          border-left: 1px solid #e0e0e0;
-          border-right: 1px solid #e0e0e0;
+        .preview-left {
+          font-size: 10px;
+          font-weight: 600;
+          color: #334155;
+          line-height: 1.2;
         }
 
-        .roll-top {
-          width: 500px;
-          height: 30px;
-          background: linear-gradient(to bottom, #d1d5db, #ffffff);
-          border-radius: 250px / 15px;
-          margin-bottom: -15px;
-          z-index: 3;
-          box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        .preview-fold {
+          width: 2px;
+          border-left: 1px dotted #cbd5e1;
+          height: 100%;
         }
 
-        .roll-bottom {
-          width: 500px;
-          height: 40px;
-          background: linear-gradient(to top, #d1d5db, #ffffff);
-          border-radius: 250px / 20px;
-          margin-top: -20px;
-          z-index: 1;
+        .preview-right {
+          text-align: center;
         }
 
-        .preview-label-container {
-          padding: 20px 40px;
-          transition: all 0.3s ease;
-        }
-
-        .thermal-label-preview {
-          background: #fff;
-          border: 1px dashed #ced4da;
-          padding: 10px;
-          border-radius: 4px;
-          transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .preview-label-container:hover .thermal-label-preview {
-          transform: scale(1.02) translateX(5px);
-          box-shadow: 0 10px 20px rgba(0,0,0,0.05);
-          border-color: #3b82f6;
-          border-style: solid;
-        }
-
-        /* Jewellery Item Tag Specific Visualization */
-        .label-shape-overlay {
-          display: flex;
-          align-items: center;
-        }
-
-        .tag-loop {
-          width: 60px;
-          height: 12px;
-          background: #f3f4f6;
-          border: 1px solid #e5e7eb;
-          border-radius: 6px 0 0 6px;
-          border-right: none;
-          position: relative;
-        }
-
-        .tag-loop::after {
-          content: "";
-          position: absolute;
-          right: -4px;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 8px;
-          height: 8px;
-          background: #fff;
-          border-radius: 50%;
-          border: 1px solid #e5e7eb;
-        }
-
-        .tag-body {
-          flex: 1;
-          height: 60px;
-          background: white;
-          border: 1px solid #e5e7eb;
-          border-radius: 0 8px 8px 0;
-          box-shadow: 2px 2px 5px rgba(0,0,0,0.02);
-          padding: 10px 15px;
-          display: flex;
-          align-items: center;
-        }
-
-        .tag-content {
-          display: flex;
-          justify-content: space-between;
-          width: 100%;
-          align-items: center;
-        }
-
-        .tag-category {
+        .preview-cat {
+          font-size: 10px;
           font-weight: 800;
-          font-size: 14px;
-          color: #1f2937;
-          letter-spacing: 0.5px;
+          margin-bottom: 2px;
         }
 
-        .tag-remark {
-          font-size: 11px;
-          color: #4b5563;
+        .preview-barcode-box {
+          display: flex;
+          justify-content: center;
+        }
+
+        .preview-val {
+          font-family: monospace;
+          font-size: 8px;
+          font-weight: 700;
           margin-top: 2px;
         }
 
-        .tag-meta {
-          font-size: 9px;
-          color: #9ca3af;
-          margin-top: 4px;
-          font-family: monospace;
-        }
-
-        .tag-right {
-           margin-left: 20px;
-        }
-
-        .perforation {
-          height: 1px;
-          border-top: 2px dotted #e5e7eb;
-          margin-top: 20px;
-          width: 100%;
+        .preview-tail {
+          width: 45%; /* Representing the 45mm tail */
+          height: 4px;
+          background: #f1f5f9;
+          border-radius: 0 2px 2px 0;
         }
 
         /* ================================================
-           ACTUAL PRINT STYLES (STRICT 100mm x 15mm)
+           ACTUAL PRINT STYLES (100mm x 15mm)
            ================================================ */
-        .print-only-container {
+        .print-actual-container {
           display: none;
         }
 
@@ -252,63 +185,75 @@ export default function BarcodePrintSheet({ items }: Props) {
             display: none !important;
           }
 
-          .print-only-container {
+          .print-actual-container {
             display: block !important;
-            margin: 0 !important;
-            padding: 0 !important;
           }
 
-          .strict-thermal-label {
+          .print-tag-page {
             width: 100mm !important;
             height: 15mm !important;
-            display: block !important;
+            display: flex !important;
+            align-items: center !important;
             page-break-after: always !important;
             overflow: hidden !important;
-            box-sizing: border-box !important;
-            padding: 0 3mm !important;
             background: #fff !important;
           }
 
-          .print-label-inner {
+          .print-tag-body {
+            width: 55mm !important; /* EXACT 55mm PRINTABLE AREA */
+            height: 15mm !important;
             display: flex !important;
-            justify-content: space-between !important;
-            align-items: center !important;
-            height: 100% !important;
-            width: 100% !important;
+            padding: 0 2mm !important;
+            box-sizing: border-box !important;
           }
 
-          .print-left {
+          .print-section {
             flex: 1 !important;
             display: flex !important;
             flex-direction: column !important;
             justify-content: center !important;
-          }
-
-          .print-category {
-            font-size: 10pt !important;
-            font-weight: 900 !important;
-            line-height: 1 !important;
-            color: #000 !important;
-            margin-bottom: 0.5mm !important;
-          }
-
-          .print-remark {
-            font-size: 8pt !important;
-            line-height: 1 !important;
-            color: #000 !important;
-            margin-bottom: 0.5mm !important;
-            white-space: nowrap !important;
             overflow: hidden !important;
           }
 
-          .print-meta {
-            font-size: 6.5pt !important;
-            color: #000 !important;
-            font-family: 'Courier New', Courier, monospace !important;
+          .print-left {
+            font-size: 7.5pt !important;
+            font-weight: 700 !important;
+            line-height: 1.1 !important;
+          }
+
+          .print-field {
+            white-space: nowrap !important;
+          }
+
+          .print-fold-gap {
+            width: 2mm !important;
           }
 
           .print-right {
-            margin-left: 2mm !important;
+            text-align: center !important;
+          }
+
+          .print-cat {
+            font-size: 8pt !important;
+            font-weight: 900 !important;
+            margin-bottom: 0.5mm !important;
+          }
+
+          .print-barcode {
+            display: flex !important;
+            justify-content: center !important;
+            height: 7mm !important;
+          }
+
+          .print-val {
+            font-size: 7pt !important;
+            font-weight: 700 !important;
+            font-family: monospace !important;
+          }
+
+          .print-tag-tail {
+            width: 45mm !important; /* EXACT 45mm TAIL */
+            height: 100% !important;
           }
 
           @page {
