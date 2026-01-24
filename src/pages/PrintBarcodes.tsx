@@ -1,7 +1,7 @@
-// src/pages/PrintBarcodes.tsx - REVERTED TO CLEAN UI
+// src/pages/PrintBarcodes.tsx - AUTO PRINT ON LOAD
 import { useEffect, useState } from "react";
 import BarcodePrintSheet from "../components/common/BarcodePrintSheet";
-import { ArrowLeft, Printer, CheckCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle } from "lucide-react";
 import { getItemByBarcode, markItemsPrinted } from "../firebase/warehouseItems";
 import toast from "react-hot-toast";
 
@@ -19,7 +19,9 @@ export default function PrintBarcodes() {
   const [items, setItems] = useState<PrintItem[]>([]);
   const [isPrinting, setIsPrinting] = useState(false);
   const [printCompleted, setPrintCompleted] = useState(false);
+  const [autoPrintTriggered, setAutoPrintTriggered] = useState(false);
 
+  // Load items from localStorage
   useEffect(() => {
     const stored = localStorage.getItem("print_barcodes");
     if (stored) {
@@ -32,9 +34,16 @@ export default function PrintBarcodes() {
     }
   }, []);
 
-  const handlePrint = () => {
-    window.print();
-  };
+  // Auto-trigger print dialog when items are loaded
+  useEffect(() => {
+    if (items.length > 0 && !autoPrintTriggered) {
+      setAutoPrintTriggered(true);
+      // Small delay to ensure DOM is fully rendered
+      setTimeout(() => {
+        window.print();
+      }, 500);
+    }
+  }, [items, autoPrintTriggered]);
 
   const markAsPrinted = async () => {
     const barcodesStr = localStorage.getItem("print_item_barcodes");
@@ -106,8 +115,8 @@ export default function PrintBarcodes() {
       <div className="no-print bg-white border-b border-gray-200 p-4 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div>
-            <h1 className="text-xl font-bold text-gray-800">Print Barcode Labels</h1>
-            <p className="text-sm text-gray-600">{items.length} items ready to print</p>
+            <h1 className="text-xl font-bold text-gray-800">Print Preview</h1>
+            <p className="text-sm text-gray-600">{items.length} items ready - Print dialog will open automatically</p>
             {printCompleted && (
               <p className="text-sm text-green-600 font-semibold mt-1 flex items-center gap-1">
                 <CheckCircle size={16} />
@@ -121,15 +130,7 @@ export default function PrintBarcodes() {
               className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 flex items-center gap-2"
             >
               <ArrowLeft size={18} />
-              Back
-            </button>
-            <button
-              onClick={handlePrint}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-semibold disabled:opacity-50"
-              disabled={printCompleted}
-            >
-              <Printer size={18} />
-              {printCompleted ? "Print Completed" : "Print Labels"}
+              Close
             </button>
             {!printCompleted && (
               <button
@@ -147,6 +148,12 @@ export default function PrintBarcodes() {
 
       {/* Print Preview Area */}
       <div className="max-w-7xl mx-auto py-8 px-4">
+        <div className="no-print mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-800">
+            <strong>ℹ️ Print Dialog Opening:</strong> The browser print dialog will open automatically.
+            If it doesn't appear, check if pop-ups are blocked or manually trigger print with Ctrl+P.
+          </p>
+        </div>
         <BarcodePrintSheet items={items} />
       </div>
     </div>
