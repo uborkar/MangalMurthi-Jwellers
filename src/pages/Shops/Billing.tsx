@@ -20,6 +20,7 @@ import {
   createSalesReturnBill,
   updateInvoiceWithReturn,
   updateStockAfterReturn,
+  updateReturnBillWithExchange,
   calculateReturnAmounts,
   generateReturnId,
   canReturnItem,
@@ -143,12 +144,13 @@ export default function Billing() {
   };
 
   // Save exchange credit to sessionStorage
-  const saveExchangeSession = (credit: number, customerName: string, customerPhone: string) => {
+  const saveExchangeSession = (credit: number, customerName: string, customerPhone: string, returnId?: string) => {
     try {
       const exchangeData = {
         credit,
         customerName,
         customerPhone,
+        returnId,  // Track which return generated this credit
         branch: selectedBranch,
         timestamp: new Date().toISOString(),
       };
@@ -626,8 +628,8 @@ export default function Billing() {
         setCustomerName(custName);
         setCustomerPhone(custPhone);
 
-        // Save to sessionStorage for persistence across navigation
-        saveExchangeSession(creditAmount, custName, custPhone);
+        // Save to sessionStorage for persistence across navigation (with returnId)
+        saveExchangeSession(creditAmount, custName, custPhone, returnId);
 
         setBillMode("new-bill");
         setOriginalInvoice(null);
@@ -820,7 +822,8 @@ export default function Billing() {
           finalAmount: totals.finalAmount || totals.grandTotal || 0,
         },
         isExchangeBill: availableCredit > 0,
-        exchangeCredit: availableCredit > 0 ? availableCredit : undefined,
+        // Only include exchangeCredit field if there's actual credit
+        ...(availableCredit > 0 && { exchangeCredit: availableCredit }),
         gstType: gstType || "cgst_sgst",
         gstSettings: {
           cgst: gstSettings?.cgst || 1.5,
@@ -864,8 +867,29 @@ export default function Billing() {
       // Show preview modal
       setShowPreview(true);
 
-      // Clear exchange session after successful invoice save
+      // Link exchange invoice back to return bill if this is an exchange
       if (availableCredit > 0) {
+        try {
+          // Get returnId from session storage
+          const exchangeSession = sessionStorage.getItem('exchangeCredit');
+          if (exchangeSession) {
+            const { returnId: originalReturnId } = JSON.parse(exchangeSession);
+            if (originalReturnId) {
+              await updateReturnBillWithExchange(
+                selectedBranch,
+                originalReturnId,
+                invoiceId,
+                totals.grandTotal,
+                availableCredit,
+                totals.finalAmount
+              );
+              console.log('✅ Return bill linked to exchange invoice');
+            }
+          }
+        } catch (linkError) {
+          console.error('Error linking exchange invoice to return:', linkError);
+          // Don't fail the sale if linking fails
+        }
         clearExchangeSession();
       }
 
@@ -887,152 +911,219 @@ export default function Billing() {
     const printHTML = createPrintHTML({
       title: `Invoice ${invoiceId}`,
       styles: `
+        body {
+          font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+          color: #000;
+        }
+
         .invoice-header {
           text-align: center;
-          border-bottom: 2px solid #000;
-          padding-bottom: 10px;
-          margin-bottom: 15px;
+          padding-bottom: 8px;
+          margin-bottom: 0;
         }
         
         .invoice-header h1 {
-          font-size: 20px;
+          font-size: 24px;
           font-weight: bold;
-          margin: 0 0 8px 0;
-          text-transform: uppercase;
+          margin: 0 0 4px 0;
+          text-transform: none;
         }
         
         .invoice-header p {
-          margin: 3px 0;
+          margin: 2px 0;
+          font-size: 11px;
+          color: #333;
+        }
+        
+        .top-meta {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          position: relative;
+          margin-top: 10px;
+          margin-bottom: 12px;
+          border-top: 1.5px solid #000;
+          border-bottom: 1.5px solid #000;
+          padding: 8px 0;
+        }
+
+        .sales-book-title {
+          font-weight: bold;
+          font-size: 14px;
+        }
+
+        .original-tag {
+          position: absolute;
+          right: 0;
+          font-weight: bold;
+          text-transform: uppercase;
           font-size: 11px;
         }
         
-        .bill-details {
+        .bill-info-container {
           display: flex;
           justify-content: space-between;
           margin-bottom: 12px;
-          font-size: 11px;
+          font-size: 12px;
+        }
+
+        .bill-info-left {
+          width: 50%;
+        }
+
+        .bill-info-right {
+          width: 50%;
+          text-align: right;
+        }
+
+        .bill-info-right p {
+          margin: 2px 0;
         }
         
-        .party-details {
-          margin-bottom: 12px;
-          font-size: 11px;
+        .party-box {
           border: 1px solid #000;
-          padding: 8px;
+          padding: 10px 15px;
+          margin-bottom: 15px;
+          font-size: 12px;
+          min-height: 70px;
         }
         
-        .party-details p {
-          margin: 3px 0;
+        .party-box p {
+          margin: 5px 0;
         }
         
         .items-table {
-          font-size: 10px;
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 11px;
           margin-bottom: 15px;
         }
         
         .items-table th {
-          background-color: #f0f0f0;
-          padding: 5px;
-          text-align: left;
+          border: 1px solid #000;
+          background-color: #f2f2f2;
+          padding: 8px 4px;
+          text-align: center;
+          font-weight: bold;
+          font-size: 10px;
+          text-transform: uppercase;
         }
         
         .items-table td {
-          padding: 5px;
+          border: 1px solid #000;
+          padding: 6px 4px;
+          height: 24px;
         }
         
-        .totals-section {
+        .totals-container {
           display: flex;
           justify-content: space-between;
-          font-size: 10px;
-          margin-top: 15px;
+          font-size: 12px;
+          margin-top: 10px;
         }
         
-        .words-section {
+        .totals-left {
           width: 55%;
         }
         
-        .amounts-section {
+        .totals-right {
           width: 42%;
           border: 1px solid #000;
         }
         
-        .amounts-section table {
+        .totals-right table {
           width: 100%;
-          font-size: 10px;
+          border-collapse: collapse;
         }
         
-        .amounts-section td {
-          padding: 5px;
-          border-bottom: 1px solid #ddd;
+        .totals-right td {
+          padding: 5px 10px;
+          border-bottom: 1px solid #eee;
+        }
+
+        .totals-right tr:last-child td {
+          border-bottom: none;
         }
         
         .total-row {
           font-weight: bold;
-          background-color: #f5f5f5;
+          background-color: #f9f9f9;
+          border-top: 1.5px solid #000;
         }
         
-        .signature-section {
+        .signature-area {
           margin-top: 50px;
           text-align: right;
           font-size: 11px;
         }
         
-        .signature-line {
-          margin-top: 35px;
+        .sig-line {
+          margin-top: 45px;
           border-top: 1px solid #000;
-          width: 180px;
-          margin-left: auto;
-          padding-top: 5px;
+          width: 220px;
+          display: inline-block;
+          text-align: center;
+          padding-top: 6px;
         }
+
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-bold { font-weight: bold; }
       `,
       bodyContent: `
-        <!-- Invoice Header -->
+        <!-- Header -->
         <div class="invoice-header">
-          <h1>${companySettings?.companyName || "JEWELRY STORE"}</h1>
-          <p>${companySettings?.companyAddress || "Store Address"}</p>
-          <p>Phone: ${companySettings?.companyPhone || "Phone Number"}</p>
-          <p><strong>GSTIN: ${companySettings?.companyGSTIN || "GSTIN Number"}</strong></p>
-          <p style="margin-top: 8px; font-weight: bold;">Sales Book - 1 <span style="float: right;">ORIGINAL</span></p>
+          <h1>${companySettings?.companyName || "Mangal-Murthi Jewelry Store"}</h1>
+          <p>${companySettings?.companyAddress || "Sangli Road, Miraj, Maharashtra"}</p>
+          <p>Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellers.com"} | Ph: ${companySettings?.companyPhone || "9270494338"}</p>
+          <p><strong>GSTIN: ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}</strong></p>
         </div>
         
-        <!-- Bill Details -->
-        <div class="bill-details">
-          <div>
-            <p><strong>Bill No:</strong> ${invoiceId}</p>
+        <!-- Sales Book Title -->
+        <div class="top-meta">
+          <span class="sales-book-title">Sales Book - 1</span>
+          <span class="original-tag">ORIGINAL</span>
+        </div>
+
+        <!-- Bill Details Row -->
+        <div class="bill-info-container">
+          <div class="bill-info-left">
+            <p><strong>Location:</strong> ${selectedBranch}</p>
+          </div>
+          <div class="bill-info-right">
             <p><strong>Bill Date:</strong> ${new Date().toLocaleDateString('en-GB')}</p>
-          </div>
-          <div style="text-align: right;">
-            <p><strong>Shop:</strong> ${selectedBranch}</p>
+            <p><strong>Bill No:</strong> ${invoiceId}</p>
           </div>
         </div>
         
-        <!-- Party & Staff Details -->
-        <div class="party-details">
+        <!-- Party Details Box -->
+        <div class="party-box">
           <p><strong>Party Name:</strong> ${customerName || "Walk-in Customer"}</p>
           <p><strong>Mo:</strong> ${customerPhone || "N/A"}</p>
-          <p><strong>Emp Name:</strong> ${salespersonName}</p>
+          <p><strong>Emp Name:</strong> ${salespersonName || "N/A"}</p>
         </div>
         
         <!-- Items Table -->
         <table class="items-table">
           <thead>
             <tr>
-              <th style="width: 30px;">SNO</th>
-              <th>Item Name</th>
-              <th style="width: 80px; text-align: center;">HSN Code</th>
-              <th style="width: 70px;">Remark</th>
-              <th style="width: 45px; text-align: center;">Loct</th>
-              <th style="width: 35px; text-align: center;">Pcs</th>
-              <th style="width: 55px; text-align: right;">Weight</th>
-              <th style="width: 45px; text-align: center;">Type</th>
-              <th style="width: 70px; text-align: right;">Rate</th>
-              <th style="width: 55px; text-align: right;">Disc</th>
-              <th style="width: 75px; text-align: right;">Taxable</th>
+              <th style="width: 40px;">SNO</th>
+              <th>ITEM NAME</th>
+              <th style="width: 70px;">HSN</th>
+              <th style="width: 90px;">REMARK</th>
+              <th style="width: 60px;">LOCT</th>
+              <th style="width: 40px;">PCS</th>
+              <th style="width: 70px;">WT</th>
+              <th style="width: 60px;">TYPE</th>
+              <th style="width: 90px;">RATE</th>
+              <th style="width: 70px;">DISC</th>
+              <th style="width: 100px;">TAXABLE</th>
             </tr>
           </thead>
           <tbody>
             ${billItems.map((item, idx) => `
               <tr>
-                <td>${idx + 1}</td>
+                <td class="text-center">${idx + 1}</td>
                 <td>${item.category}</td>
                 <td class="text-center">7103</td>
                 <td>${item.subcategory || "-"}</td>
@@ -1042,27 +1133,31 @@ export default function Billing() {
                 <td class="text-center">${item.type}</td>
                 <td class="text-right">${item.sellingPrice.toFixed(2)}</td>
                 <td class="text-right">${item.discount.toFixed(2)}</td>
-                <td class="text-right">${item.taxableAmount.toFixed(2)}</td>
+                <td class="text-right font-bold">${item.taxableAmount.toFixed(2)}</td>
+              </tr>
+            `).join('')}
+            <!-- Fill empty rows to maintain height -->
+            ${Array(Math.max(0, 8 - billItems.length)).fill(0).map(() => `
+              <tr>
+                <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
               </tr>
             `).join('')}
           </tbody>
         </table>
         
         <!-- Totals Section -->
-        <div class="totals-section">
-          <!-- Left: Amount in Words -->
-          <div class="words-section">
-            <p style="margin: 5px 0; font-weight: bold;">
-              Rupees: ${numberToWords(totals.finalAmount || totals.grandTotal)}
-            </p>
-            <div style="margin-top: 35px; font-size: 9px;">
-              <p style="margin: 3px 0;"><strong>GST No:</strong> ${companySettings?.companyGSTIN || "GSTIN"}</p>
-              <p style="margin: 3px 0;"><strong>State:</strong> Maharashtra</p>
+        <div class="totals-container">
+          <!-- Left Side -->
+          <div class="totals-left">
+            <p style="margin-bottom: 25px; font-weight: bold;">Rupees: ${numberToWords(totals.finalAmount || totals.grandTotal)}</p>
+            <div style="font-size: 10px; line-height: 1.8;">
+              <p><strong>GST No:</strong> ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}</p>
+              <p><strong>State:</strong> Maharashtra</p>
             </div>
           </div>
           
-          <!-- Right: Amounts -->
-          <div class="amounts-section">
+          <!-- Right Side -->
+          <div class="totals-right">
             <table>
               <tr>
                 <td>Net Amount:</td>
@@ -1070,12 +1165,12 @@ export default function Billing() {
               </tr>
               ${gstType === "cgst_sgst" ? `
                 <tr>
-                  <td>CGST ${gstSettings?.cgst || 1.5}%:</td>
-                  <td class="text-right">${totals.cgst.toFixed(2)}</td>
-                </tr>
-                <tr>
                   <td>SGST ${gstSettings?.sgst || 1.5}%:</td>
                   <td class="text-right">${totals.sgst.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>CGST ${gstSettings?.cgst || 1.5}%:</td>
+                  <td class="text-right">${totals.cgst.toFixed(2)}</td>
                 </tr>
               ` : `
                 <tr>
@@ -1109,12 +1204,10 @@ export default function Billing() {
           </div>
         </div>
         
-        <!-- Signature -->
-        <div class="signature-section">
-          <p style="margin: 0;">For ${companySettings?.companyName || "JEWELRY STORE"}</p>
-          <div class="signature-line">
-            Authorized Signatory
-          </div>
+        <!-- Footer / Signature -->
+        <div class="signature-area">
+          <p>For: ${companySettings?.companyName || "Mangal-Murthi Jewelry Store"}</p>
+          <div class="sig-line">Authorized Signatory</div>
         </div>
       `
     });
@@ -1229,56 +1322,145 @@ export default function Billing() {
     }
 
     const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.width;
+    const invoiceId = `INV-${Date.now().toString().slice(-8)}`;
+    const compName = companySettings?.companyName || "Mangal-Murthi Jewelry Store";
 
-    // Header
+    // Header - Centered
     doc.setFontSize(18);
-    doc.text("SALES INVOICE", 105, 15, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.text(compName, pageWidth / 2, 15, { align: "center" });
 
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(companySettings?.companyAddress || "Sangli Road, Miraj, Maharashtra", pageWidth / 2, 20, { align: "center" });
+    doc.text(`Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellers.com"} | Ph: ${companySettings?.companyPhone || "9270494338"}`, pageWidth / 2, 24, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.text(`GSTIN: ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}`, pageWidth / 2, 28, { align: "center" });
+
+    doc.line(10, 32, pageWidth - 10, 32);
+
+    // Sub-header centered
     doc.setFontSize(11);
-    doc.text(`Branch: ${selectedBranch}`, 14, 25);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 32);
-    doc.text(`Customer: ${customerName}`, 14, 39);
-    if (customerPhone) doc.text(`Phone: ${customerPhone}`, 14, 46);
-    doc.text(`Salesperson: ${salespersonName}`, 14, customerPhone ? 53 : 46);
+    doc.text("Sales Book - 1", pageWidth / 2, 38, { align: "center" });
+    doc.setFontSize(9);
+    doc.text("ORIGINAL", pageWidth - 15, 38, { align: "right" });
+
+    doc.line(10, 42, pageWidth - 10, 42);
+
+    // Branch & Meta
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Location: ${selectedBranch}`, 14, 48);
+    doc.text(`Bill Date: ${new Date().toLocaleDateString('en-GB')}`, pageWidth - 14, 48, { align: "right" });
+    doc.text(`Bill No: ${invoiceId}`, pageWidth - 14, 53, { align: "right" });
+
+    // Party Details Box
+    doc.setDrawColor(0);
+    doc.rect(14, 58, pageWidth - 28, 20);
+    doc.text(`Party Name: ${customerName || "Walk-in Customer"}`, 18, 63);
+    doc.text(`Mo: ${customerPhone || "N/A"}`, 18, 68);
+    doc.text(`Emp Name: ${salespersonName || "N/A"}`, 18, 73);
 
     // Table
     const tableData = billItems.map((item, idx) => [
       idx + 1,
       item.category,
-      item.barcode,
-      "-", // Lot
-      1, // Pcs
+      "7103",
+      item.subcategory || "-",
+      item.location,
+      1,
       item.weight,
       item.type,
-      `Rs. ${item.sellingPrice.toFixed(2)}`,
-      `Rs. ${item.taxableAmount.toFixed(2)}`,
+      item.sellingPrice.toFixed(2),
+      item.discount.toFixed(2),
+      item.taxableAmount.toFixed(2),
     ]);
 
     autoTable(doc, {
-      startY: customerPhone ? 60 : 53,
-      head: [["#", "Item", "Barcode", "Lot", "Pcs", "Wt", "Type", "Rate", "Taxable"]],
+      startY: 82,
+      head: [["SNO", "ITEM NAME", "HSN", "REMARK", "LOCT", "PCS", "WT", "TYPE", "RATE", "DISC", "TAXABLE"]],
       body: tableData,
       theme: "grid",
+      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontSize: 8, halign: 'center' },
+      styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 10 },
+        2: { halign: 'center', cellWidth: 15 },
+        4: { halign: 'center', cellWidth: 15 },
+        5: { halign: 'center', cellWidth: 10 },
+        6: { halign: 'right', cellWidth: 15 },
+        7: { halign: 'center', cellWidth: 15 },
+        8: { halign: 'right', cellWidth: 18 },
+        9: { halign: 'right', cellWidth: 15 },
+        10: { halign: 'right', cellWidth: 20 },
+      }
     });
 
-    // Totals
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Subtotal: Rs. ${totals.subtotal.toFixed(2)}`, 140, finalY);
-    doc.text(`Discount: Rs. ${totals.totalDiscount.toFixed(2)}`, 140, finalY + 7);
-    doc.text(`Taxable: Rs. ${totals.taxable.toFixed(2)}`, 140, finalY + 14);
 
+    // Totals Section
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Rupees: ${numberToWords(totals.finalAmount || totals.grandTotal)}`, 14, finalY);
+
+    // Small footer left
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.text(`GST No: ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}`, 14, finalY + 15);
+    doc.text(`State: Maharashtra`, 14, finalY + 20);
+
+    // Totals Box Right
+    const totalsX = pageWidth - 80;
+    doc.rect(totalsX, finalY - 5, 66, availableCredit > 0 ? 55 : 45);
+
+    let currentY = finalY;
+    doc.setFontSize(9);
+    doc.text(`Net Amount:`, totalsX + 2, currentY);
+    doc.text(`${totals.taxable.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+
+    currentY += 6;
     if (gstType === "cgst_sgst") {
-      doc.text(`CGST (${gstSettings?.cgst || 1.5}%): Rs. ${totals.cgst.toFixed(2)}`, 140, finalY + 21);
-      doc.text(`SGST (${gstSettings?.sgst || 1.5}%): Rs. ${totals.sgst.toFixed(2)}`, 140, finalY + 28);
+      doc.text(`SGST ${gstSettings?.sgst || 1.5}%:`, totalsX + 2, currentY);
+      doc.text(`${totals.sgst.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+      currentY += 6;
+      doc.text(`CGST ${gstSettings?.cgst || 1.5}%:`, totalsX + 2, currentY);
+      doc.text(`${totals.cgst.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
     } else {
-      doc.text(`IGST (${gstSettings?.igst || 3}%): Rs. ${totals.igst.toFixed(2)}`, 140, finalY + 21);
+      doc.text(`IGST ${gstSettings?.igst || 3}%:`, totalsX + 2, currentY);
+      doc.text(`${totals.igst.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
     }
 
-    doc.setFontSize(12);
+    currentY += 8;
     doc.setFont("helvetica", "bold");
-    doc.text(`Grand Total: Rs. ${totals.grandTotal.toFixed(2)}`, 140, finalY + 38);
+    doc.text(`Bill Amount:`, totalsX + 2, currentY);
+    doc.text(`${totals.grandTotal.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+
+    if (availableCredit > 0) {
+      currentY += 6;
+      doc.setFont("helvetica", "normal");
+      doc.text(`Exchange Credit:`, totalsX + 2, currentY);
+      doc.text(`-${availableCredit.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+      currentY += 8;
+      doc.setFont("helvetica", "bold");
+      doc.text(`Final Amount:`, totalsX + 2, currentY);
+      doc.text(`${totals.finalAmount.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+    }
+
+    currentY += 6;
+    doc.setFont("helvetica", "normal");
+    doc.text(`Cash Received:`, totalsX + 2, currentY);
+    doc.text(`${(totals.finalAmount || totals.grandTotal).toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+
+    currentY += 6;
+    doc.text(`Outstanding:`, totalsX + 2, currentY);
+    doc.text(`0.00`, pageWidth - 16, currentY, { align: "right" });
+
+    // Signature
+    doc.setFontSize(9);
+    doc.text(`For: ${compName}`, pageWidth - 14, currentY + 20, { align: "right" });
+    doc.line(pageWidth - 60, currentY + 35, pageWidth - 14, currentY + 35);
+    doc.text(`Authorized Signatory`, pageWidth - 37, currentY + 40, { align: "center" });
 
     doc.save(`Invoice_${selectedBranch}_${Date.now()}.pdf`);
     toast.success("PDF exported");

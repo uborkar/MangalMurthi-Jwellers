@@ -1,29 +1,70 @@
 // src/pages/Shops/SalesBooking.tsx - Sales Booking/Order Management
 import { useState, useEffect } from "react";
+import { collection, addDoc, getDocs, query, where, orderBy, limit, doc, setDoc } from "firebase/firestore";
+import { db } from "../../firebase/config";
+import toast from "react-hot-toast";
+import { Calendar, Phone, Package, Plus, Trash2, Save, FileText, Printer, Download, ShoppingCart, Scan, Search, X } from "lucide-react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
+import { numberToWords } from "../../utils/numberToWords";
+import { createPrintHTML, printDocument } from "../../utils/printUtils";
 import TASection from "../../components/common/TASection";
 import PageMeta from "../../components/common/PageMeta";
 import CustomDropdown from "../../components/common/CustomDropdown";
-import toast from "react-hot-toast";
-import { Calendar, Phone, Package, Plus, Trash2, Save, FileText, Printer, Download, ShoppingCart, Scan } from "lucide-react";
-import { doc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
-import { db } from "../../firebase/config";
-import * as XLSX from "xlsx";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
 import { getShopStock, BranchStockItem } from "../../firebase/shopStock";
 import { getItemByBarcode } from "../../firebase/warehouseItems";
 import { createBookingLedgerEntry } from "../../firebase/ledger";
-import { useShop, BookingItem, BranchName } from "../../context/ShopContext";
-import { createPrintHTML, printDocument } from "../../utils/printUtils";
+import { useShop, BookingItem as ShopBookingItem, BranchName } from "../../context/ShopContext";
 import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
-import { numberToWords } from "../../utils/numberToWords";
 import { getAllActiveSalespersons, addSalesperson, deleteSalesperson, Salesperson } from "../../firebase/salespersons";
+import { useNavigate } from "react-router-dom";
 
-const DEFAULT_BRANCHES: string[] = ["Sangli", "Miraj", "Kolhapur", "Mumbai", "Pune"];
+const DEFAULT_BRANCHES = ["Miraj", "Sangli", "Ichalkaranji", "Tasgaon"];
+
+interface BookingItem {
+  id: string;
+  itemName?: string;
+  category?: string;
+  subcategory?: string;
+  weight?: string;
+  type?: string;
+  location?: string;
+  sellingPrice?: number;
+  discount?: number;
+  taxableAmount?: number;
+  barcode?: string;
+  costPrice?: number;
+  shopStockId?: string;
+  warehouseItemId?: string;
+  stoneSapphire?: string;
+  trNo?: string;
+  pieces?: number;
+  total?: number;
+}
+
+interface SavedBooking {
+  id: string;
+  bookingNo: string;
+  partyName: string;
+  mobileNo: string;
+  branch: string;
+  salespersonName: string;
+  items: BookingItem[];
+  netAmount: number;
+  cashAdvance: number;
+  pendingAmount: number;
+  remarks: string;
+  createdAt: string;
+  deliveryDate?: string;
+  totalAmount?: number;
+  status?: string;
+}
 
 export default function SalesBooking() {
   const { branchStockCache, setBranchStockCache, currentBooking, updateBooking, clearBooking } = useShop();
+  const navigate = useNavigate();
 
   const [selectedBranch, setSelectedBranch] = useState<BranchName>(currentBooking.branch);
 
@@ -51,12 +92,13 @@ export default function SalesBooking() {
   // Additional Info
   const [remarks, setRemarks] = useState(currentBooking.remarks);
 
-  // History
+  // History - Enhanced for multiple bookings
   const [showHistory, setShowHistory] = useState(false);
-  const [lastBooking, setLastBooking] = useState<any>(null);
+  const [lastBooking, setLastBooking] = useState<SavedBooking | null>(null);
+  const [recentBookings, setRecentBookings] = useState<SavedBooking[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Preview Modal
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  // Saved Data context
   const [savedBookingData, setSavedBookingData] = useState<any>(null);
 
   // Dynamic branches list
@@ -273,6 +315,7 @@ export default function SalesBooking() {
       const newItem: BookingItem = {
         id: crypto.randomUUID(),
         barcode: barcode,
+        itemName: stockItem.category || warehouseItem?.category || "Unknown", // Add itemName for display
         category: stockItem.category || warehouseItem?.category || "Unknown",
         subcategory: stockItem.subcategory || warehouseItem?.subcategory || "",
         location: stockItem.location || warehouseItem?.location || "",
@@ -411,15 +454,6 @@ export default function SalesBooking() {
       return;
     }
 
-    // Check if all items have required fields
-    const invalidItems = bookingItems.filter(
-      (item) => !item.itemName?.trim() || !item.weight
-    );
-    if (invalidItems.length > 0) {
-      toast.error("Please fill item name and weight for all items");
-      return;
-    }
-
     setLoading(true);
     const loadingToast = toast.loading("Saving booking...");
 
@@ -435,22 +469,29 @@ export default function SalesBooking() {
         branch: selectedBranch,
         partyName,
         mobileNo,
-        deliveryDate,
+        deliveryDate: deliveryDate || "",
         salespersonName,
         items: bookingItems.map((item) => ({
-          barcode: item.barcode,
-          itemName: item.itemName,
-          stoneSapphire: item.stoneSapphire,
-          trNo: item.trNo,
-          pieces: item.pieces,
-          weight: item.weight,
-          total: item.total,
+          barcode: item.barcode || "",
+          itemName: item.itemName || "",
+          category: item.category || "",
+          subcategory: item.subcategory || "",
+          weight: item.weight || "",
+          type: item.type || "",
+          location: item.location || "",
+          sellingPrice: item.sellingPrice || 0,
+          discount: item.discount || 0,
+          taxableAmount: item.taxableAmount || 0,
+          stoneSapphire: item.stoneSapphire || "",
+          trNo: item.trNo || "",
+          pieces: item.pieces || 0,
+          total: item.total || 0,
         })),
-        netAmount,
-        cashAdvance,
-        totalAmount,
-        pendingAmount,
-        remarks,
+        netAmount: netAmount || 0,
+        cashAdvance: cashAdvance || 0,
+        totalAmount: totalAmount || 0,
+        pendingAmount: pendingAmount || 0,
+        remarks: remarks || "",
         status: "pending",
         createdAt: new Date().toISOString(),
         createdBy: "current-user", // TODO: Get from auth
@@ -480,26 +521,81 @@ export default function SalesBooking() {
         toast("⚠️ Booking saved but ledger entry failed", { duration: 3000 });
       }
 
-      // Save booking data for preview
+      // Update stock status for all booked items
+      try {
+        let updatedCount = 0;
+        for (const item of bookingItems) {
+          try {
+            let stockDocId = item.shopStockId;
+
+            // If no shopStockId, try to find by barcode
+            if (!stockDocId && item.barcode) {
+              const stockQuery = query(
+                collection(db, "shops", selectedBranch, "stock"),
+                where("barcode", "==", item.barcode)
+              );
+              const stockSnapshot = await getDocs(stockQuery);
+              if (!stockSnapshot.empty) {
+                stockDocId = stockSnapshot.docs[0].id;
+              }
+            }
+
+            if (stockDocId) {
+              const stockRef = doc(db, "shops", selectedBranch, "stock", stockDocId);
+              await setDoc(stockRef, {
+                status: "booked",
+                bookedBy: bookingId,
+                bookedAt: new Date().toISOString(),
+              }, { merge: true });
+              updatedCount++;
+              console.log(`✅ Updated stock status for item: ${item.barcode || item.itemName}`);
+            } else {
+              console.warn(`⚠️ Could not find stock document for item: ${item.barcode || item.itemName}`);
+            }
+          } catch (itemError) {
+            console.error(`Error updating stock for item ${item.barcode}:`, itemError);
+          }
+        }
+        console.log(`✅ Stock status updated for ${updatedCount}/${bookingItems.length} items`);
+        if (updatedCount < bookingItems.length) {
+          toast(`⚠️ ${updatedCount}/${bookingItems.length} items updated`, { duration: 3000 });
+        }
+      } catch (stockError) {
+        console.error("Error updating stock status:", stockError);
+        toast("⚠️ Booking saved but stock status update failed", { duration: 3000 });
+      }
+
+      // Save booking data for context or further actions if needed
       setSavedBookingData({
+        id: bookingId,
         bookingNo,
-        bookingId,
         branch: selectedBranch,
         partyName,
         mobileNo,
-        deliveryDate,
+        deliveryDate: deliveryDate || "",
         salespersonName,
         items: bookingItems,
-        totalAmount,
-        netAmount,
-        cashAdvance,
-        pendingAmount,
-        remarks,
+        totalAmount: totalAmount || 0,
+        netAmount: netAmount || 0,
+        cashAdvance: cashAdvance || 0,
+        pendingAmount: pendingAmount || 0,
+        remarks: remarks || "",
         createdAt: new Date().toISOString(),
       });
 
-      // Show preview modal
-      setShowPreviewModal(true);
+      // Refresh branch stock to reflect updated statuses
+      await loadBranchStock();
+
+      // Clear booking items after successful save
+      setBookingItems([]);
+      setPartyName("");
+      setMobileNo("");
+      setDeliveryDate("");
+      setRemarks("");
+      setCashAdvance(0);
+
+      // Instead of an incomplete modal, just confirm success
+      toast.success(`Booking ${bookingNo} saved successfully!`);
 
     } catch (error) {
       console.error("Error saving booking:", error);
@@ -516,365 +612,233 @@ export default function SalesBooking() {
 
     const fmt = (num: number) => (num || 0).toFixed(2);
     const dateStr = new Date(savedBookingData.createdAt).toLocaleDateString('en-GB');
-    const timeStr = new Date(savedBookingData.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
     // Calculate GST if not in saved data
-    const netAmount = savedBookingData.netAmount || 0;
-    const gstRate = gstSettings?.cgst || 1.5;
-    const cgst = (netAmount * gstRate) / 100;
-    const sgst = (netAmount * gstRate) / 100;
-    const totalWithGST = netAmount + cgst + sgst;
+    const netAmountVal = savedBookingData.netAmount || 0;
+    const gstRateVal = gstSettings?.cgst || 1.5;
+    const cgstVal = (netAmountVal * gstRateVal) / 100;
+    const sgstVal = (netAmountVal * gstRateVal) / 100;
+    const totalWithGSTVal = netAmountVal + cgstVal + sgstVal;
 
     const itemsHtml = savedBookingData.items.map((item: any, idx: number) => {
       const itemTaxable = (item.sellingPrice || 0) - (item.discount || 0);
       return `
-      <tr style="height: 24px;">
-        <td style="text-align: center;">${idx + 1}</td>
+      <tr>
+        <td class="text-center">${idx + 1}</td>
         <td>${item.category || item.itemName || ''}</td>
-        <td style="text-align: center; font-family: monospace;">${item.barcode || ''}</td>
-        <td style="text-align: center;">${item.location || ''}</td>
-        <td style="text-align: center;">1</td>
-        <td style="text-align: right;">${item.weight || ''}</td>
-        <td style="text-align: center;">${item.type || ''}</td>
-        <td style="text-align: right;">${fmt(item.sellingPrice || 0)}</td>
-        <td style="text-align: right;">${fmt(item.discount || 0)}</td>
-        <td style="text-align: right;">${fmt(item.taxableAmount || itemTaxable)}</td>
+        <td class="text-center">7103</td>
+        <td>${item.subcategory || ''}</td>
+        <td class="text-center">${item.location || ''}</td>
+        <td class="text-center">1</td>
+        <td class="text-right">${item.weight || ''}</td>
+        <td class="text-center">${item.type || ''}</td>
+        <td class="text-right">${fmt(item.sellingPrice || 0)}</td>
+        <td class="text-right">${fmt(item.discount || 0)}</td>
+        <td class="text-right font-bold">${fmt(item.taxableAmount || itemTaxable)}</td>
       </tr>
     `;
     }).join('');
 
-    // Fill empty rows to maintain height
-    const emptyRowsCount = Math.max(0, 8 - savedBookingData.items.length);
-    const emptyRowsHtml = Array(emptyRowsCount).fill(0).map(() => `
-      <tr style="height: 24px;">
-        <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
-      </tr>
-    `).join('');
-
     const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Booking - ${savedBookingData.partyName}</title>
-        <style>
-          @page { size: A4; margin: 10mm; }
-          * { box-sizing: border-box; }
-          body { 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 10px; 
-            color: #000; 
-            font-size: 10px;
-            line-height: 1.3;
-          }
-          
-          .invoice-header {
-            text-align: center;
-            border-bottom: 2px solid #000;
-            padding-bottom: 10px;
-            margin-bottom: 12px;
-          }
-          
-          .invoice-header h1 {
-            font-size: 18px;
-            font-weight: bold;
-            margin: 0 0 5px 0;
-            text-transform: uppercase;
-          }
-          
-          .invoice-header p {
-            margin: 2px 0;
-            font-size: 10px;
-          }
-          
-          .original-badge {
-            float: right;
-            border: 1px solid #000;
-            padding: 3px 8px;
-            font-size: 10px;
-            font-weight: bold;
-          }
-          
-          .invoice-meta {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            font-size: 10px;
-          }
-          
-          .party-details {
-            margin-bottom: 10px;
-            font-size: 10px;
-            border: 1px solid #000;
-            padding: 5px;
-          }
-          
-          .party-details p {
-            margin: 2px 0;
-          }
-          
-          table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 9px; 
-            margin-bottom: 12px;
-          }
-          
-          th { 
-            border: 1px solid #000; 
-            padding: 4px; 
-            background: #f0f0f0; 
-            font-weight: bold;
-            text-align: left;
-          }
-          
-          td { 
-            border: 1px solid #000; 
-            padding: 3px 4px; 
-          }
-          
-          .totals-section {
-            display: flex;
-            justify-content: space-between;
-            font-size: 10px;
-            margin-top: 12px;
-          }
-          
-          .words-section {
-            width: 55%;
-            font-size: 9px;
-          }
-          
-          .amounts-section {
-            width: 42%;
-            border: 1px solid #000;
-          }
-          
-          .amounts-section table {
-            width: 100%;
-            font-size: 9px;
-          }
-          
-          .amounts-section td {
-            padding: 4px;
-            border-bottom: 1px solid #ddd;
-          }
-          
-          .total-row {
-            font-weight: bold;
-            background-color: #f5f5f5;
-          }
-          
-          .signature-section {
-            margin-top: 40px;
-            text-align: right;
-            font-size: 10px;
-          }
-          
-          .signature-line {
-            margin-top: 30px;
-            border-top: 1px solid #000;
-            width: 150px;
-            margin-left: auto;
-            padding-top: 5px;
-          }
+      <!-- Header -->
+      <div class="invoice-header">
+        <h1>${companySettings?.companyName || "Mangal-Murthi Jewelry Store"}</h1>
+        <p>${companySettings?.companyAddress || "Sangli Road, Miraj, Maharashtra"}</p>
+        <p>Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellers.com"} | Ph: ${companySettings?.companyPhone || "9270494338"}</p>
+        <p><strong>GSTIN: ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}</strong></p>
+      </div>
+      
+      <!-- Sales Book Title -->
+      <div class="top-meta">
+        <span class="sales-book-title">Sales Book - 1</span>
+        <span class="original-tag">ORIGINAL</span>
+      </div>
 
-          @media print {
-            body { -webkit-print-color-adjust: exact; }
-          }
-        </style>
-      </head>
-      <body>
-
-        <!-- Invoice Header -->
-        <div class="invoice-header">
-          <h1>${companySettings?.companyName || "MANGALMURTHI JEWELLERY LTD"}</h1>
-          <p>Address: ${companySettings?.companyAddress || "10TH SWARN MARKET, OPERA HOUSE, Mumbai - 400004"}</p>
-          <p>Ph: ${companySettings?.companyPhone || "[Phone Number]"} | Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellery.com"}</p>
-          <p><strong>GSTIN: ${companySettings?.companyGSTIN || "[GST NUMBER]"}</strong></p>
-          <p style="margin-top: 6px; font-weight: bold;">
-            Sales Booking <span class="original-badge">ORIGINAL</span>
-          </p>
+      <!-- Bill Details Row -->
+      <div class="bill-info-container">
+        <div class="bill-info-left">
+          <p><strong>Location:</strong> ${savedBookingData.branch}</p>
         </div>
-        
-        <!-- Invoice Meta -->
-        <div class="invoice-meta">
-          <div>
-            <p><strong>Booking No:</strong> ${savedBookingData.bookingNo || 'N/A'}</p>
-            <p><strong>Booking Date:</strong> ${dateStr} ${timeStr}</p>
-          </div>
-          <div style="text-align: right;">
-            <p><strong>Location:</strong> ${savedBookingData.branch || selectedBranch}</p>
-            <p><strong>Delivery Date:</strong> ${savedBookingData.deliveryDate || 'N/A'}</p>
-          </div>
+        <div class="bill-info-right">
+          <p><strong>Bill Date:</strong> ${dateStr}</p>
+          <p><strong>Bill No:</strong> ${savedBookingData.bookingNo || savedBookingData.bookingId}</p>
         </div>
-        
-        <!-- Party & Staff Details -->
-        <div class="party-details">
-          <p><strong>Party Name:</strong> ${savedBookingData.partyName}</p>
-          <p><strong>Mo:</strong> ${savedBookingData.mobileNo || ''}</p>
-          <p><strong>Emp Name:</strong> ${savedBookingData.salespersonName || ''}</p>
-        </div>
-        
-        <!-- Items Table -->
-        <table>
-          <thead>
+      </div>
+      
+      <!-- Party Details Box -->
+      <div class="party-box">
+        <p><strong>Party Name:</strong> ${savedBookingData.partyName}</p>
+        <p><strong>Mo:</strong> ${savedBookingData.mobileNo || ''}</p>
+        <p><strong>Emp Name:</strong> ${savedBookingData.salespersonName || 'N/A'}</p>
+      </div>
+      
+      <!-- Items Table -->
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width: 40px;">SNO</th>
+            <th>ITEM NAME</th>
+            <th style="width: 70px;">HSN</th>
+            <th style="width: 90px;">REMARK</th>
+            <th style="width: 60px;">LOCT</th>
+            <th style="width: 40px;">PCS</th>
+            <th style="width: 70px;">WT</th>
+            <th style="width: 60px;">TYPE</th>
+            <th style="width: 90px;">RATE</th>
+            <th style="width: 70px;">DISC</th>
+            <th style="width: 100px;">TAXABLE</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+          ${Array(Math.max(0, 8 - savedBookingData.items.length)).fill(0).map(() => `
             <tr>
-              <th style="width: 25px;">SNO</th>
-              <th>ITEM NAME</th>
-              <th style="width: 80px;">BARCODE</th>
-              <th style="width: 40px;">LOCT</th>
-              <th style="width: 30px; text-align: center;">PCS</th>
-              <th style="width: 60px; text-align: right;">WEIGHT</th>
-              <th style="width: 40px;">TYPE</th>
-              <th style="width: 70px; text-align: right;">RATE</th>
-              <th style="width: 60px; text-align: right;">DISCOUNT</th>
-              <th style="width: 80px; text-align: right;">TAXABLE VALUE</th>
+              <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
             </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-            ${emptyRowsHtml}
-          </tbody>
-        </table>
-        
-        <!-- Totals Section -->
-        <div class="totals-section">
-          <!-- Left: Amount in Words & Description -->
-          <div class="words-section">
-            <p style="margin: 5px 0; font-weight: bold;">
-              Rupees: ${numberToWords(totalWithGST)}
-            </p>
-            <div style="margin-top: 30px; font-size: 8px;">
-              <p><strong>Remarks:</strong> ${savedBookingData.remarks || '-'}</p>
-              <p style="margin-top: 15px;"><strong>GST No:</strong> ${companySettings?.companyGSTIN || "[GST NUMBER]"}</p>
-              <p><strong>State:</strong> Maharashtra</p>
-            </div>
-          </div>
-          
-          <!-- Right: Amounts -->
-          <div class="amounts-section">
-            <table>
-              <tr>
-                <td>Net Amount:</td>
-                <td style="text-align: right;">${fmt(netAmount)}</td>
-              </tr>
-              ${gstType === "cgst_sgst" ? `
-                <tr>
-                  <td>SGST ${gstRate}%:</td>
-                  <td style="text-align: right;">${fmt(sgst)}</td>
-                </tr>
-                <tr>
-                  <td>CGST ${gstRate}%:</td>
-                  <td style="text-align: right;">${fmt(cgst)}</td>
-                </tr>
-              ` : `
-                <tr>
-                  <td>IGST ${(gstSettings?.igst || 3)}%:</td>
-                  <td style="text-align: right;">${fmt(cgst + sgst)}</td>
-                </tr>
-              `}
-              <tr class="total-row">
-                <td><strong>Bill Amount:</strong></td>
-                <td style="text-align: right;"><strong>${fmt(totalWithGST)}</strong></td>
-              </tr>
-              <tr>
-                <td>Advance Amt:</td>
-                <td style="text-align: right;">${fmt(savedBookingData.cashAdvance)}</td>
-              </tr>
-              <tr>
-                <td>Cash Amount:</td>
-                <td style="text-align: right;">${fmt(savedBookingData.cashAdvance)}</td>
-              </tr>
-              <tr class="total-row">
-                <td><strong>Bill Outstanding:</strong></td>
-                <td style="text-align: right;"><strong>${fmt(savedBookingData.pendingAmount || (totalWithGST - savedBookingData.cashAdvance))}</strong></td>
-              </tr>
-            </table>
+          `).join('')}
+        </tbody>
+      </table>
+      
+      <!-- Totals Section -->
+      <div class="totals-container">
+        <!-- Left Side -->
+        <div class="totals-left">
+          <p style="margin-bottom: 25px; font-weight: bold;">Rupees: ${numberToWords(totalWithGSTVal)}</p>
+          <div style="font-size: 10px; line-height: 1.8;">
+            <p><strong>GST No:</strong> ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}</p>
+            <p><strong>State:</strong> Maharashtra</p>
+            <p style="margin-top: 10px;"><strong>Remarks:</strong> ${savedBookingData.remarks || '-'}</p>
           </div>
         </div>
         
-        <!-- Signature -->
-        <div class="signature-section">
-          <p style="margin: 0;">For: ${companySettings?.companyName || "MANGALMURTHI JEWELLERY LTD"}</p>
-          <div class="signature-line">
-            Signature
-          </div>
+        <!-- Right Side -->
+        <div class="totals-right">
+          <table>
+            <tr>
+              <td>Net Amount:</td>
+              <td class="text-right">${fmt(netAmountVal)}</td>
+            </tr>
+            ${gstType === "cgst_sgst" ? `
+              <tr>
+                <td>SGST ${gstSettings?.sgst || 1.5}%:</td>
+                <td class="text-right">${fmt(sgstVal)}</td>
+              </tr>
+              <tr>
+                <td>CGST ${gstSettings?.cgst || 1.5}%:</td>
+                <td class="text-right">${fmt(cgstVal)}</td>
+              </tr>
+            ` : `
+              <tr>
+                <td>IGST ${gstSettings?.igst || 3}%:</td>
+                <td class="text-right">${fmt(cgstVal + sgstVal)}</td>
+              </tr>
+            `}
+            <tr class="total-row">
+              <td>Bill Amount:</td>
+              <td class="text-right">${fmt(totalWithGSTVal)}</td>
+            </tr>
+            <tr>
+              <td>Advance Amt:</td>
+              <td class="text-right">${fmt(savedBookingData.cashAdvance)}</td>
+            </tr>
+            <tr>
+              <td>Cash Amount:</td>
+              <td class="text-right">${fmt(savedBookingData.cashAdvance)}</td>
+            </tr>
+            <tr class="total-row">
+              <td>Bill Outstanding:</td>
+              <td class="text-right"><strong>${fmt(savedBookingData.pendingAmount || (totalWithGSTVal - savedBookingData.cashAdvance))}</strong></td>
+            </tr>
+          </table>
         </div>
-
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.print();
-            }, 500);
-          };
-        </script>
-      </body>
-      </html>
+      </div>
+      
+      <!-- Footer / Signature -->
+      <div class="signature-area">
+        <p>For: ${companySettings?.companyName || "Mangal-Murthi Jewelry Store"}</p>
+        <div class="sig-line">Authorized Signatory</div>
+      </div>
     `;
 
-    // Open print window
-    const printWindow = window.open('', '_blank', 'width=800,height=900');
-    if (!printWindow) {
-      toast.error("Please allow pop-ups to print");
-      return;
-    }
+    const printHTML = createPrintHTML({
+      title: `Booking - ${savedBookingData.partyName}`,
+      styles: `
+        body { font-family: 'Inter', 'Roboto', 'Helvetica', 'Arial', sans-serif; color: #000; }
+        .invoice-header { text-align: center; padding-bottom: 8px; margin-bottom: 0; }
+        .invoice-header h1 { font-size: 24px; font-weight: bold; margin: 0 0 4px 0; text-transform: none; }
+        .invoice-header p { margin: 2px 0; font-size: 11px; color: #333; }
+        .top-meta { display: flex; justify-content: center; align-items: center; position: relative; margin-top: 10px; margin-bottom: 12px; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 8px 0; }
+        .sales-book-title { font-weight: bold; font-size: 14px; }
+        .original-tag { position: absolute; right: 0; font-weight: bold; text-transform: uppercase; font-size: 11px; }
+        .bill-info-container { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 12px; }
+        .bill-info-left { width: 50%; }
+        .bill-info-right { width: 50%; text-align: right; }
+        .bill-info-right p { margin: 2px 0; }
+        .party-box { border: 1px solid #000; padding: 10px 15px; margin-bottom: 15px; font-size: 12px; min-height: 70px; }
+        .party-box p { margin: 5px 0; }
+        .items-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 15px; }
+        .items-table th { border: 1px solid #000; background-color: #f2f2f2; padding: 8px 4px; text-align: center; font-weight: bold; font-size: 10px; text-transform: uppercase; }
+        .items-table td { border: 1px solid #000; padding: 6px 4px; height: 24px; }
+        .totals-container { display: flex; justify-content: space-between; font-size: 12px; margin-top: 10px; }
+        .totals-left { width: 55%; }
+        .totals-right { width: 42%; border: 1px solid #000; }
+        .totals-right table { width: 100%; border-collapse: collapse; }
+        .totals-right td { padding: 5px 10px; border-bottom: 1px solid #eee; }
+        .totals-right tr:last-child td { border-bottom: none; }
+        .total-row { font-weight: bold; background-color: #f9f9f9; border-top: 1.5px solid #000; }
+        .signature-area { margin-top: 50px; text-align: right; font-size: 11px; }
+        .sig-line { margin-top: 45px; border-top: 1px solid #000; width: 220px; display: inline-block; text-align: center; padding-top: 6px; }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-bold { font-weight: bold; }
+      `,
+      bodyContent: html
+    });
 
-    printWindow.document.write(html);
-    printWindow.document.close();
-
-    // Auto-print when loaded
-    printWindow.onload = function () {
-      setTimeout(function () {
-        printWindow.print();
-      }, 500);
-    };
-
-    setShowPreviewModal(false);
+    printDocument(printHTML);
   };
 
-  // Close modal and optionally clear
-  const handleCloseModal = () => {
-    setShowPreviewModal(false);
-
-    const shouldClear = window.confirm(
-      "Do you want to clear the form and start a new booking?"
-    );
-
-    if (shouldClear) {
-      clearBooking();
-      setPartyName("");
-      setMobileNo("");
-      setDeliveryDate("");
-      setSalespersonName("");
-      setBookingItems([]);
-      setCashAdvance(0);
-      setNetAmount(0);
-      setPendingAmount(0);
-      setTotalAmount(0);
-      setRemarks("");
-    }
-  };
-
-  // Load last booking
-  const loadLastBooking = async () => {
+  // Load recent bookings with enhanced tracking
+  const loadRecentBookings = async () => {
+    setLoadingHistory(true);
     try {
       const bookingsRef = collection(db, "shops", selectedBranch, "bookings");
-      const q = query(bookingsRef, orderBy("createdAt", "desc"), limit(1));
+      const q = query(bookingsRef, orderBy("createdAt", "desc"), limit(10));
       const snap = await getDocs(q);
 
       if (!snap.empty) {
-        setLastBooking(snap.docs[0].data());
+        const bookings: SavedBooking[] = snap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as SavedBooking));
+
+        setRecentBookings(bookings);
+        setLastBooking(bookings[0]); // Set most recent as last booking
         setShowHistory(true);
-        toast.success("Last booking loaded");
+
+        // Calculate total pending across all bookings
+        const totalPending = bookings.reduce((sum, booking) =>
+          sum + (booking.pendingAmount || 0), 0
+        );
+
+        toast.success(`Loaded ${bookings.length} recent bookings. Total pending: ₹${totalPending.toFixed(2)}`);
       } else {
         toast("No previous bookings found");
+        setRecentBookings([]);
+        setLastBooking(null);
       }
     } catch (error) {
-      console.error("Error loading last booking:", error);
+      console.error("Error loading booking history:", error);
       toast.error("Failed to load booking history");
+    } finally {
+      setLoadingHistory(false);
     }
   };
+
+  // Auto-load recent bookings on mount and branch change
+  useEffect(() => {
+    loadRecentBookings();
+  }, [selectedBranch]);
 
   // Export to Excel
   const exportToExcel = () => {
@@ -940,7 +904,7 @@ export default function SalesBooking() {
     toast.success("Excel exported");
   };
 
-  // Export to PDF - Professional Format
+  // Export to PDF - Standardized Professional Format
   const exportToPDF = () => {
     if (bookingItems.length === 0) {
       toast.error("No items to export");
@@ -948,126 +912,138 @@ export default function SalesBooking() {
     }
 
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageWidth = doc.internal.pageSize.width;
+    const bookingNo = `BKG-${Date.now().toString().slice(-6)}`;
+    const compName = companySettings?.companyName || "Mangal-Murthi Jewelry Store";
 
-    // Company Header
-    doc.setFillColor(0, 128, 128); // Teal color
-    doc.rect(0, 0, pageWidth, 25, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(20);
+    // Header - Centered
+    doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
-    doc.text("SUWARNASPARSH JEWELLERS", pageWidth / 2, 12, { align: "center" });
-    doc.setFontSize(12);
-    doc.text("SALES BOOKING", pageWidth / 2, 20, { align: "center" });
+    doc.text(compName, pageWidth / 2, 15, { align: "center" });
 
-    // Reset text color
-    doc.setTextColor(0, 0, 0);
-
-    // Booking Details Box
-    doc.setDrawColor(0, 128, 128);
-    doc.setLineWidth(0.5);
-    doc.rect(14, 30, pageWidth - 28, 40);
-
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("Branch:", 18, 38);
-    doc.text("Date:", 18, 46);
-    doc.text("Party Name:", 18, 54);
-    doc.text("Mobile:", 18, 62);
-
-    doc.text("Delivery Date:", pageWidth / 2, 38);
-    doc.text("Salesperson:", pageWidth / 2, 46);
-
+    doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    doc.text(selectedBranch, 50, 38);
-    doc.text(new Date().toLocaleDateString('en-GB'), 50, 46);
-    doc.text(partyName, 50, 54);
-    doc.text(mobileNo, 50, 62);
-    doc.text(deliveryDate, pageWidth / 2 + 35, 38);
-    doc.text(salespersonName, pageWidth / 2 + 35, 46);
+    doc.text(companySettings?.companyAddress || "Sangli Road, Miraj, Maharashtra", pageWidth / 2, 20, { align: "center" });
+    doc.text(`Web: ${companySettings?.companyWebsite || "www.mangalmurthijewellers.com"} | Ph: ${companySettings?.companyPhone || "9270494338"}`, pageWidth / 2, 24, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.text(`GSTIN: ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}`, pageWidth / 2, 28, { align: "center" });
 
-    // Table with professional styling
+    doc.line(10, 32, pageWidth - 10, 32);
+
+    // Sub-header centered
+    doc.setFontSize(11);
+    doc.text("Sales Book - 1", pageWidth / 2, 38, { align: "center" });
+    doc.setFontSize(9);
+    doc.text("ORIGINAL", pageWidth - 15, 38, { align: "right" });
+
+    doc.line(10, 42, pageWidth - 10, 42);
+
+    // Branch & Meta
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Location: ${selectedBranch}`, 14, 48);
+    doc.text(`Bill Date: ${new Date().toLocaleDateString('en-GB')}`, pageWidth - 14, 48, { align: "right" });
+    doc.text(`Bill No: ${bookingNo}`, pageWidth - 14, 53, { align: "right" });
+
+    // Party Details Box
+    doc.setDrawColor(0);
+    doc.rect(14, 58, pageWidth - 28, 20);
+    doc.text(`Party Name: ${partyName || "Walk-in Customer"}`, 18, 63);
+    doc.text(`Mo: ${mobileNo || "N/A"}`, 18, 68);
+    doc.text(`Emp Name: ${salespersonName || "N/A"}`, 18, 73);
+
+    // Table
     const tableData = bookingItems.map((item, idx) => [
       idx + 1,
-      item.itemName || "-",
-      item.stoneSapphire || "-",
-      item.trNo || "-",
-      item.pieces || 0,
+      item.category || "-",
+      "7103",
+      item.subcategory || "-",
+      item.location || "-",
+      1,
       item.weight || "-",
-      `₹${(item.total || 0).toFixed(2)}`,
+      item.type || "-",
+      (item.sellingPrice || 0).toFixed(2),
+      (item.discount || 0).toFixed(2),
+      (item.taxableAmount || 0).toFixed(2),
     ]);
 
     autoTable(doc, {
-      startY: 75,
-      head: [["#", "Item Name", "Stone/Sapphire", "Tr No", "Pcs", "Weight", "Amount"]],
+      startY: 82,
+      head: [["SNO", "ITEM NAME", "HSN", "REMARK", "LOCT", "PCS", "WT", "TYPE", "RATE", "DISC", "TAXABLE"]],
       body: tableData,
       theme: "grid",
-      headStyles: {
-        fillColor: [0, 128, 128],
-        textColor: [255, 255, 255],
-        fontStyle: "bold",
-        fontSize: 10,
-      },
-      bodyStyles: {
-        fontSize: 9,
-      },
-      alternateRowStyles: {
-        fillColor: [240, 248, 255],
-      },
+      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontSize: 8, halign: 'center' },
+      styles: { fontSize: 8, cellPadding: 2 },
       columnStyles: {
-        0: { halign: "center", cellWidth: 12 },
-        4: { halign: "center", cellWidth: 15 },
-        5: { halign: "right", cellWidth: 20 },
-        6: { halign: "right", cellWidth: 25 },
-      },
+        0: { halign: 'center', cellWidth: 10 },
+        2: { halign: 'center', cellWidth: 15 },
+        4: { halign: 'center', cellWidth: 15 },
+        5: { halign: 'center', cellWidth: 10 },
+        6: { halign: 'right', cellWidth: 15 },
+        7: { halign: 'center', cellWidth: 15 },
+        8: { halign: 'right', cellWidth: 18 },
+        9: { halign: 'right', cellWidth: 15 },
+        10: { halign: 'right', cellWidth: 20 },
+      }
     });
 
-    // Totals Box
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setDrawColor(0, 128, 128);
-    doc.setLineWidth(0.5);
-    doc.rect(pageWidth - 80, finalY, 66, 45);
 
+    // Totals Section
     doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text("Items Total:", pageWidth - 76, finalY + 10);
-    doc.text(`₹${totalAmount.toFixed(2)}`, pageWidth - 18, finalY + 10, { align: "right" });
-
-    doc.text("Net Amount:", pageWidth - 76, finalY + 18);
-    doc.text(`₹${(netAmount || 0).toFixed(2)}`, pageWidth - 18, finalY + 18, { align: "right" });
-
-    doc.text("Cash Advance:", pageWidth - 76, finalY + 26);
-    doc.setTextColor(0, 128, 0);
-    doc.text(`₹${(cashAdvance || 0).toFixed(2)}`, pageWidth - 18, finalY + 26, { align: "right" });
-
-    doc.setTextColor(0, 0, 0);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text("Pending:", pageWidth - 76, finalY + 38);
-    doc.setTextColor(220, 0, 0);
-    doc.text(`₹${(pendingAmount || 0).toFixed(2)}`, pageWidth - 18, finalY + 38, { align: "right" });
+    doc.text(`Rupees: ${numberToWords(totals.grandTotal)}`, 14, finalY);
 
-    // Remarks
-    doc.setTextColor(0, 0, 0);
-    if (remarks) {
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "italic");
-      doc.text(`Remarks: ${remarks}`, 14, finalY + 15);
+    // Small footer left
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.text(`GST No: ${companySettings?.companyGSTIN || "27AANCS1421M1Z3"}`, 14, finalY + 15);
+    doc.text(`State: Maharashtra`, 14, finalY + 20);
+    if (remarks) doc.text(`Remarks: ${remarks}`, 14, finalY + 25);
+
+    // Totals Box Right
+    const totalsX = pageWidth - 80;
+    doc.rect(totalsX, finalY - 5, 66, 45);
+
+    let currentY = finalY;
+    doc.setFontSize(9);
+    doc.text(`Net Amount:`, totalsX + 2, currentY);
+    doc.text(`${totals.taxable.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+
+    currentY += 6;
+    if (gstType === "cgst_sgst") {
+      doc.text(`SGST ${gstSettings?.sgst || 1.5}%:`, totalsX + 2, currentY);
+      doc.text(`${totals.sgst.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+      currentY += 6;
+      doc.text(`CGST ${gstSettings?.cgst || 1.5}%:`, totalsX + 2, currentY);
+      doc.text(`${totals.cgst.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+    } else {
+      doc.text(`IGST ${gstSettings?.igst || 3}%:`, totalsX + 2, currentY);
+      doc.text(`${totals.igst.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
     }
 
-    // Signatures
-    const sigY = finalY + 60;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.line(14, sigY, 60, sigY);
-    doc.line(pageWidth - 60, sigY, pageWidth - 14, sigY);
-    doc.text("Customer Signature", 14, sigY + 5);
-    doc.text("Authorized Signatory", pageWidth - 60, sigY + 5);
+    currentY += 8;
+    doc.setFont("helvetica", "bold");
+    doc.text(`Bill Amount:`, totalsX + 2, currentY);
+    doc.text(`${totals.grandTotal.toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
 
-    // Footer
-    doc.setFontSize(8);
-    doc.setTextColor(128, 128, 128);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 285);
+    currentY += 6;
+    doc.setFont("helvetica", "normal");
+    doc.text(`Cash Advance:`, totalsX + 2, currentY);
+    doc.text(`${(cashAdvance || 0).toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+
+    currentY += 8;
+    doc.setFont("helvetica", "bold");
+    doc.text(`Outstanding:`, totalsX + 2, currentY);
+    doc.setTextColor(220, 0, 0);
+    doc.text(`${(pendingAmount || 0).toFixed(2)}`, pageWidth - 16, currentY, { align: "right" });
+    doc.setTextColor(0, 0, 0);
+
+    // Signature
+    doc.setFontSize(9);
+    doc.text(`For: ${compName}`, pageWidth - 14, currentY + 20, { align: "right" });
+    doc.line(pageWidth - 60, currentY + 35, pageWidth - 14, currentY + 35);
+    doc.text(`Authorized Signatory`, pageWidth - 37, currentY + 40, { align: "center" });
 
     doc.save(`Booking_${partyName}_${Date.now()}.pdf`);
     toast.success("PDF exported");
@@ -1522,10 +1498,11 @@ export default function SalesBooking() {
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-2 mb-6">
               <button
-                onClick={loadLastBooking}
-                className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+                onClick={loadRecentBookings}
+                disabled={loadingHistory}
+                className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ShoppingCart size={16} /> Last Booking
+                <ShoppingCart size={16} /> {loadingHistory ? "Loading..." : "Recent Bookings"}
               </button>
               <button
                 onClick={exportToExcel}
@@ -2000,7 +1977,8 @@ export default function SalesBooking() {
                       toast.success("Booking cleared");
                     }
                   }}
-                  className="px-6 py-4 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-3"
+                  className="px-6 py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-3 disabled:opacity-50"
+                  disabled={loading}
                 >
                   <Trash2 size={24} />
                   Clear Booking
@@ -2008,7 +1986,7 @@ export default function SalesBooking() {
                 <button
                   onClick={handleSaveBooking}
                   disabled={loading}
-                  className="px-8 py-4 bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-white rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
+                  className="px-8 py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl disabled:bg-purple-400 disabled:cursor-not-allowed flex items-center gap-3"
                 >
                   <Save size={24} />
                   {loading ? "Saving..." : "Save Booking"}
@@ -2016,12 +1994,12 @@ export default function SalesBooking() {
               </div>
             )}
 
-            {/* Last Booking History */}
-            {showHistory && lastBooking && (
+            {/* Recent Bookings History */}
+            {showHistory && recentBookings.length > 0 && (
               <div className="mt-6 p-6 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-bold text-purple-900 dark:text-purple-300">
-                    📜 Last Booking
+                    📜 Recent Bookings History
                   </h3>
                   <button
                     onClick={() => setShowHistory(false)}
@@ -2031,102 +2009,189 @@ export default function SalesBooking() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Booking No:</span>
-                    <p className="font-semibold">{lastBooking.bookingNo}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Party Name:</span>
-                    <p className="font-semibold">{lastBooking.partyName}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Mobile:</span>
-                    <p className="font-semibold">{lastBooking.mobileNo}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Delivery Date:</span>
-                    <p className="font-semibold">{lastBooking.deliveryDate}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Salesperson:</span>
-                    <p className="font-semibold">{lastBooking.salespersonName}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Status:</span>
-                    <p className="font-semibold capitalize">
-                      <span className={`px-2 py-1 rounded text-xs ${lastBooking.status === "pending"
-                        ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                        : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                        }`}>
-                        {lastBooking.status}
-                      </span>
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Created:</span>
-                    <p className="font-semibold">
-                      {new Date(lastBooking.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
+                {/* Bookings List */}
+                <div className="space-y-3 mb-4">
+                  {recentBookings.map((booking, index) => (
+                    <div
+                      key={booking.id}
+                      onClick={() => setLastBooking(booking)}
+                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${lastBooking?.id === booking.id
+                        ? "border-purple-500 bg-purple-100 dark:bg-purple-900/40"
+                        : "border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-800 hover:border-purple-400"
+                        }`}
+                    >
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400 text-xs">Booking No:</span>
+                          <p className="font-semibold">{booking.bookingNo}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400 text-xs">Party:</span>
+                          <p className="font-semibold">{booking.partyName}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400 text-xs">Date:</span>
+                          <p className="font-semibold">
+                            {new Date(booking.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400 text-xs">Net Amount:</span>
+                          <p className="font-semibold">₹{booking.netAmount?.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400 text-xs">Pending:</span>
+                          <p className={`font-bold ${(booking.pendingAmount || 0) > 0
+                            ? "text-red-600 dark:text-red-400"
+                            : "text-green-600 dark:text-green-400"
+                            }`}>
+                            ₹{booking.pendingAmount?.toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="overflow-x-auto rounded-lg border border-purple-200 dark:border-purple-800 mb-4">
-                  <table className="w-full text-sm">
-                    <thead className="bg-purple-100 dark:bg-purple-900/40">
-                      <tr className="text-left">
-                        <th className="p-2">#</th>
-                        <th className="p-2">Item Name</th>
-                        <th className="p-2">Stone/Sapphire</th>
-                        <th className="p-2">Tr No</th>
-                        <th className="p-2">Pcs</th>
-                        <th className="p-2">Weight</th>
-                        <th className="p-2">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lastBooking.items?.map((item: any, idx: number) => (
-                        <tr key={idx} className="border-b border-purple-200 dark:border-purple-800">
-                          <td className="p-2">{idx + 1}</td>
-                          <td className="p-2">{item.itemName}</td>
-                          <td className="p-2">{item.stoneSapphire || "-"}</td>
-                          <td className="p-2">{item.trNo || "-"}</td>
-                          <td className="p-2">{item.pieces}</td>
-                          <td className="p-2">{item.weight}</td>
-                          <td className="p-2 font-semibold">₹{item.total.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {/* Selected Booking Details */}
+                {lastBooking && (
+                  <div className="border-t-2 border-purple-300 dark:border-purple-700 pt-4">
+                    <h4 className="font-bold text-purple-900 dark:text-purple-300 mb-3">
+                      Selected Booking Details
+                    </h4>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-purple-100 dark:bg-purple-900/40 rounded-lg p-4">
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Items Total:</span>
-                    <p className="font-bold text-lg">₹{lastBooking.totalAmount?.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Net Amount:</span>
-                    <p className="font-bold text-lg">₹{lastBooking.netAmount?.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Cash Advance:</span>
-                    <p className="font-bold text-lg text-green-600 dark:text-green-400">
-                      ₹{lastBooking.cashAdvance?.toFixed(2)}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-gray-600 dark:text-gray-400">Pending Amount:</span>
-                    <p className="font-bold text-lg text-red-600 dark:text-red-400">
-                      ₹{lastBooking.pendingAmount?.toFixed(2)}
-                    </p>
-                  </div>
-                </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Booking No:</span>
+                        <p className="font-semibold">{lastBooking.bookingNo}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Party Name:</span>
+                        <p className="font-semibold">{lastBooking.partyName}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Mobile:</span>
+                        <p className="font-semibold">{lastBooking.mobileNo}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Delivery Date:</span>
+                        <p className="font-semibold">{lastBooking.deliveryDate || "N/A"}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Salesperson:</span>
+                        <p className="font-semibold">{lastBooking.salespersonName}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Status:</span>
+                        <p className="font-semibold capitalize">
+                          <span className={`px-2 py-1 rounded text-xs ${lastBooking.status === "pending"
+                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                            : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                            }`}>
+                            {lastBooking.status || "completed"}
+                          </span>
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Created:</span>
+                        <p className="font-semibold">
+                          {new Date(lastBooking.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
 
-                {lastBooking.remarks && (
-                  <div className="mt-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-800">
-                    <span className="text-xs text-gray-600 dark:text-gray-400">Remarks:</span>
-                    <p className="text-sm mt-1">{lastBooking.remarks}</p>
+                    <div className="overflow-x-auto rounded-lg border border-purple-200 dark:border-purple-800 mb-4">
+                      <table className="w-full text-sm">
+                        <thead className="bg-purple-100 dark:bg-purple-900/40">
+                          <tr className="text-left">
+                            <th className="p-2">#</th>
+                            <th className="p-2">Item Name</th>
+                            <th className="p-2">HSN</th>
+                            <th className="p-2">Remark</th>
+                            <th className="p-2">Loct</th>
+                            <th className="p-2">Pcs</th>
+                            <th className="p-2">Weight</th>
+                            <th className="p-2">Type</th>
+                            <th className="p-2">Rate</th>
+                            <th className="p-2">Disc</th>
+                            <th className="p-2">Taxable</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lastBooking.items?.map((item: any, idx: number) => (
+                            <tr key={idx} className="border-b border-purple-200 dark:border-purple-800">
+                              <td className="p-2">{idx + 1}</td>
+                              <td className="p-2">{item.category || item.itemName || "-"}</td>
+                              <td className="p-2">7103</td>
+                              <td className="p-2">{item.subcategory || "-"}</td>
+                              <td className="p-2">{item.location || "-"}</td>
+                              <td className="p-2 text-center">1</td>
+                              <td className="p-2 text-right">{item.weight || "-"}</td>
+                              <td className="p-2 text-center">{item.type || "-"}</td>
+                              <td className="p-2 text-right">₹{(item.sellingPrice || 0).toFixed(2)}</td>
+                              <td className="p-2 text-right">₹{(item.discount || 0).toFixed(2)}</td>
+                              <td className="p-2 text-right font-semibold">₹{(item.taxableAmount || 0).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-purple-100 dark:bg-purple-900/40 rounded-lg p-4">
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Items Total:</span>
+                        <p className="font-bold text-lg">₹{lastBooking.totalAmount?.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Net Amount:</span>
+                        <p className="font-bold text-lg">₹{lastBooking.netAmount?.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Cash Advance:</span>
+                        <p className="font-bold text-lg text-green-600 dark:text-green-400">
+                          ₹{lastBooking.cashAdvance?.toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600 dark:text-gray-400">Pending Amount:</span>
+                        <p className="font-bold text-lg text-red-600 dark:text-red-400">
+                          ₹{lastBooking.pendingAmount?.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {lastBooking.remarks && (
+                      <div className="mt-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-800">
+                        <span className="text-xs text-gray-600 dark:text-gray-400">Remarks:</span>
+                        <p className="text-sm mt-1">{lastBooking.remarks}</p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons for Selected Booking */}
+                    <div className="mt-4 flex gap-3">
+                      <button
+                        onClick={() => {
+                          // Load this booking into the form
+                          setPartyName(lastBooking.partyName);
+                          setMobileNo(lastBooking.mobileNo);
+                          setSalespersonName(lastBooking.salespersonName);
+                          setRemarks(lastBooking.remarks);
+                          toast.success("Booking loaded into form");
+                        }}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Load to Form
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSavedBookingData(lastBooking);
+                          setTimeout(() => handlePrintBooking(), 100);
+                        }}
+                        className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                      >
+                        <Printer size={16} /> Print
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2134,162 +2199,6 @@ export default function SalesBooking() {
           </TASection>
         </div>
       </div>
-
-      {/* Preview Modal (Like Distribution Challan) */}
-      {showPreviewModal && savedBookingData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Modal Header */}
-            <div className="no-print flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                📋 Booking Preview
-              </h2>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handlePrintBooking}
-                  className="px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-semibold transition-colors flex items-center gap-2"
-                >
-                  <Printer size={20} />
-                  Print
-                </button>
-                <button
-                  onClick={handleCloseModal}
-                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Content - Professional Preview */}
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
-              <div className="invoice-print bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 max-w-[210mm] mx-auto">
-                {/* SECTION 1: HEADER */}
-                <div className="invoice-header">
-                  <div className="company-name">SALES BOOKING</div>
-                  <div className="company-address">
-                    Branch: {savedBookingData.branch}
-                  </div>
-                </div>
-
-                {/* SECTION 2: META INFO */}
-                <div className="invoice-meta">
-                  <div className="invoice-meta-row">
-                    <div className="invoice-meta-label">Booking No:</div>
-                    <div className="invoice-meta-value">{savedBookingData.bookingNo}</div>
-                    <div className="invoice-meta-label">Date:</div>
-                    <div className="invoice-meta-value">{new Date(savedBookingData.createdAt).toLocaleDateString()}</div>
-                  </div>
-                  <div className="invoice-meta-row">
-                    <div className="invoice-meta-label">Party Name:</div>
-                    <div className="invoice-meta-value">{savedBookingData.partyName}</div>
-                    <div className="invoice-meta-label">Mobile:</div>
-                    <div className="invoice-meta-value">{savedBookingData.mobileNo}</div>
-                  </div>
-                  <div className="invoice-meta-row">
-                    <div className="invoice-meta-label">Delivery Date:</div>
-                    <div className="invoice-meta-value">{savedBookingData.deliveryDate}</div>
-                    <div className="invoice-meta-label">Salesperson:</div>
-                    <div className="invoice-meta-value">{savedBookingData.salespersonName}</div>
-                  </div>
-                </div>
-
-                {/* SECTION 3: ITEMS TABLE */}
-                <table className="invoice-table">
-                  <thead>
-                    <tr>
-                      <th className="col-sno">#</th>
-                      <th className="col-item">ITEM NAME</th>
-                      <th className="col-remark">STONE/SAPPHIRE</th>
-                      <th className="col-hsn">TR NO</th>
-                      <th className="col-pcs">PCS</th>
-                      <th className="col-weight">WEIGHT</th>
-                      <th className="col-amount">TOTAL</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {savedBookingData.items.map((item: any, idx: number) => (
-                      <tr key={idx}>
-                        <td className="col-sno">{idx + 1}</td>
-                        <td className="col-item">{item.itemName}</td>
-                        <td className="col-remark">{item.stoneSapphire}</td>
-                        <td className="col-hsn">{item.trNo}</td>
-                        <td className="col-pcs">{item.pieces}</td>
-                        <td className="col-weight">{item.weight}</td>
-                        <td className="col-amount">₹{item.total.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {/* SECTION 4: TOTALS */}
-                <div className="invoice-totals">
-                  <div className="invoice-totals-row subtotal">
-                    <div className="invoice-totals-label">Items Total:</div>
-                    <div className="invoice-totals-value">₹{savedBookingData.totalAmount.toFixed(2)}</div>
-                  </div>
-                  <div className="invoice-totals-row">
-                    <div className="invoice-totals-label">Net Amount:</div>
-                    <div className="invoice-totals-value">₹{(savedBookingData.netAmount || 0).toFixed(2)}</div>
-                  </div>
-                  <div className="invoice-totals-row">
-                    <div className="invoice-totals-label">Cash Advance:</div>
-                    <div className="invoice-totals-value">₹{(savedBookingData.cashAdvance || 0).toFixed(2)}</div>
-                  </div>
-                  <div className="invoice-totals-row total">
-                    <div className="invoice-totals-label">Pending Amount:</div>
-                    <div className="invoice-totals-value">₹{(savedBookingData.pendingAmount || 0).toFixed(2)}</div>
-                  </div>
-                </div>
-
-                {/* SECTION 5: REMARKS */}
-                {savedBookingData.remarks && (
-                  <div className="invoice-payment">
-                    <div className="invoice-payment-title">REMARKS</div>
-                    <div>{savedBookingData.remarks}</div>
-                  </div>
-                )}
-
-                {/* SECTION 6: FOOTER */}
-                <div className="invoice-footer">
-                  <div className="invoice-signatures">
-                    <div className="invoice-signature">
-                      <div className="invoice-signature-line">Customer Signature</div>
-                    </div>
-                    <div className="invoice-signature">
-                      <div className="invoice-signature-line">
-                        Authorized Signatory
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="no-print flex items-center justify-between p-6 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Review booking before printing
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleCloseModal}
-                  className="px-6 py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-xl font-medium transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handlePrintBooking}
-                  className="px-6 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl font-semibold transition-colors flex items-center gap-2"
-                >
-                  <Printer size={18} />
-                  Print Now
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
     </>
   );

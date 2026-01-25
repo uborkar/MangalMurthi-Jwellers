@@ -243,6 +243,45 @@ export async function updateInvoiceWithReturn(
 }
 
 /**
+ * Update return bill with exchange invoice information
+ */
+export async function updateReturnBillWithExchange(
+  branch: string,
+  returnId: string,
+  exchangeInvoiceId: string,
+  newBillTotal: number,
+  creditAdjusted: number,
+  balanceAmount: number
+): Promise<void> {
+  try {
+    // Find return bill by returnId
+    const returnsRef = collection(db, "shops", branch, "salesReturns");
+    const q = query(returnsRef, where("returnId", "==", returnId), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      console.warn(`⚠️ Return bill not found: ${returnId}`);
+      return;
+    }
+
+    const returnDoc = snapshot.docs[0];
+    await updateDoc(doc(db, "shops", branch, "salesReturns", returnDoc.id), {
+      exchangeInvoiceId,
+      newBillTotal,
+      creditAdjusted,
+      balanceAmount,
+      status: "completed",
+      updatedAt: new Date().toISOString(),
+    });
+
+    console.log(`✅ Return bill updated with exchange invoice: ${exchangeInvoiceId}`);
+  } catch (error) {
+    console.error("❌ Error updating return bill:", error);
+    throw error;
+  }
+}
+
+/**
  * Update stock item status after return
  */
 export async function updateStockAfterReturn(

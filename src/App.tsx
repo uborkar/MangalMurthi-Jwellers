@@ -50,7 +50,12 @@ import { AuthProvider } from "./context/AuthContext";
 import { ShopProvider } from "./context/ShopContext";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import TestBarcodeScanner from "./pages/TestBarcodeScanner";
+import { migrateBookedItemsStatus } from "./utils/migrateBookedItems";
 
+// Make migration available in console for one-time execution
+if (typeof window !== 'undefined') {
+  (window as any).runMigration = migrateBookedItemsStatus;
+}
 
 export default function App() {
   return (
