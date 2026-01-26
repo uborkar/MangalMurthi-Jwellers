@@ -847,61 +847,85 @@ export default function SalesBooking() {
       return;
     }
 
-    const data = bookingItems.map((item, idx) => ({
-      "SNO": idx + 1,
-      "Item Name": item.itemName,
-      "Stone/Sapphire": item.stoneSapphire,
-      "Tr No": item.trNo,
-      "Pcs": item.pieces,
-      "Weight": item.weight,
-      "Total": item.total,
+    const workbook = XLSX.utils.book_new();
+
+    // Booking Details Sheet
+    const bookingDetails = [
+      { Field: "Booking Information", Value: "" },
+      { Field: "Branch", Value: selectedBranch },
+      { Field: "Party Name", Value: partyName },
+      { Field: "Mobile No", Value: mobileNo },
+      { Field: "Delivery Date", Value: deliveryDate },
+      { Field: "Salesperson", Value: salespersonName },
+      { Field: "Created Date", Value: new Date().toLocaleDateString() },
+      {},
+      { Field: "Financial Summary", Value: "" },
+      { Field: "Items Total", Value: `₹${totalAmount.toFixed(2)}` },
+      { Field: "Net Amount", Value: `₹${netAmount.toFixed(2)}` },
+      { Field: "Cash Advance", Value: `₹${cashAdvance.toFixed(2)}` },
+      { Field: "Pending Amount", Value: `₹${pendingAmount.toFixed(2)}` },
+      {},
+      { Field: "Remarks", Value: remarks || "-" },
+    ];
+    const detailsSheet = XLSX.utils.json_to_sheet(bookingDetails);
+    XLSX.utils.book_append_sheet(workbook, detailsSheet, "Booking Details");
+
+    // Items Sheet - Alphabetically ordered columns
+    const itemsData = bookingItems.map((item, idx) => ({
+      "S.No": idx + 1,
+      "Barcode": item.barcode || "-",
+      "Category": item.category || item.itemName || "-",
+      "Discount (₹)": (item.discount || 0).toFixed(2),
+      "HSN": "7103",
+      "Location": item.location || "-",
+      "Pieces": 1,
+      "Rate (₹)": (item.sellingPrice || 0).toFixed(2),
+      "Remark": item.subcategory || "-",
+      "Taxable Amount (₹)": (item.taxableAmount || 0).toFixed(2),
+      "Type": item.type || "-",
+      "Weight (gm)": item.weight || "-",
     }));
 
-    // Add summary
-    data.push({
-      "SNO": "",
-      "Item Name": "",
-      "Stone/Sapphire": "",
-      "Tr No": "",
-      "Pcs": "",
-      "Weight": "TOTAL",
-      "Total": totalAmount,
+    // Add totals row
+    itemsData.push({
+      "S.No": "",
+      "Barcode": "",
+      "Category": "",
+      "Discount (₹)": "",
+      "HSN": "",
+      "Location": "",
+      "Pieces": "",
+      "Rate (₹)": "",
+      "Remark": "TOTAL",
+      "Taxable Amount (₹)": netAmount.toFixed(2),
+      "Type": "",
+      "Weight (gm)": "",
     } as any);
 
-    data.push({} as any); // Empty row
-    data.push({
-      "SNO": "",
-      "Item Name": "Net Amount",
-      "Stone/Sapphire": "",
-      "Tr No": "",
-      "Pcs": "",
-      "Weight": "",
-      "Total": netAmount,
-    } as any);
-    data.push({
-      "SNO": "",
-      "Item Name": "Cash Advance",
-      "Stone/Sapphire": "",
-      "Tr No": "",
-      "Pcs": "",
-      "Weight": "",
-      "Total": cashAdvance,
-    } as any);
-    data.push({
-      "SNO": "",
-      "Item Name": "Pending Amt",
-      "Stone/Sapphire": "",
-      "Tr No": "",
-      "Pcs": "",
-      "Weight": "",
-      "Total": pendingAmount,
-    } as any);
+    const itemsSheet = XLSX.utils.json_to_sheet(itemsData);
 
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Booking");
-    XLSX.writeFile(workbook, `Booking_${partyName}_${Date.now()}.xlsx`);
-    toast.success("Excel exported");
+    // Set column widths
+    itemsSheet['!cols'] = [
+      { wch: 6 },  // S.No
+      { wch: 15 }, // Barcode
+      { wch: 20 }, // Category
+      { wch: 12 }, // Discount
+      { wch: 8 },  // HSN
+      { wch: 12 }, // Location
+      { wch: 8 },  // Pieces
+      { wch: 12 }, // Rate
+      { wch: 20 }, // Remark
+      { wch: 15 }, // Taxable Amount
+      { wch: 10 }, // Type
+      { wch: 12 }, // Weight
+    ];
+
+    XLSX.utils.book_append_sheet(workbook, itemsSheet, "Items");
+
+    // Generate filename
+    const filename = `Booking_${partyName.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+    toast.success("Excel exported successfully!");
   };
 
   // Export to PDF - Standardized Professional Format
