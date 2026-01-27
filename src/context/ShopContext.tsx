@@ -29,7 +29,7 @@ export interface BookingItem {
   stoneSapphire?: string;
   trNo?: string;
   pieces?: number;
-  weight: string;
+  weight?: string; // Made optional to match actual usage
   total?: number;
   // Additional properties used in SalesBooking
   category?: string;
