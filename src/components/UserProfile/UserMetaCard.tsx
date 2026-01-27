@@ -19,7 +19,7 @@ export default function UserMetaCard() {
             <div className="w-20 h-21 overflow-hidden border border-gray-200 rounded-full dark:border-gray-800">
               <img src="/images/user/owner.jpg" alt="user" />
             </div>
-            <div className="order-3 xl:order-2">D:/Infoyashonand_Technology/MM/tailwind.config.js
+            <div className="order-3 xl:order-2">
 
               <h4 className="mb-2 text-lg font-semibold text-center text-gray-800 dark:text-white/90 xl:text-left">
                 Umair Borkar
