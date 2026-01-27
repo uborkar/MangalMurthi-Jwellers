@@ -97,7 +97,7 @@ export default function SignInForm() {
                 <div>
                   <button
                     type="submit"
-                    className="w-full px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    className="w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
                     disabled={loading}
                   >
                     {loading ? "Signing in..." : "Sign in"}
