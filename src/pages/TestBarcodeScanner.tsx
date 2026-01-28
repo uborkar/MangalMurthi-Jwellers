@@ -203,8 +203,7 @@ export default function TestBarcodeScanner() {
 
 
             {/* Print Styles */}
-            <style dangerouslySetInnerHTML={{
-                __html: `
+            <style>{`
         @media print {
           .no-print {
             display: none !important;
@@ -222,7 +221,7 @@ export default function TestBarcodeScanner() {
             page-break-inside: avoid;
           }
         }
-      `}} />
+      `}</style>
         </>
     );
 }

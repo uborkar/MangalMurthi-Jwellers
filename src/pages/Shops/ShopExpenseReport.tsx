@@ -546,6 +546,7 @@ export default function ShopExpenseReport() {
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -565,19 +566,18 @@ export default function ShopExpenseReport() {
       </head>
       <body>
         ${pages.join('')}
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.print();
-            }, 500);
-          };
-        </script>
       </body>
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    // Use safer DOM manipulation instead of document.write()
+    printWindow.document.documentElement.innerHTML = html;
+
+    // Trigger print after content is loaded
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
+
     toast.success(`Generating PDF for ${pages.length} day(s)`);
   };
 

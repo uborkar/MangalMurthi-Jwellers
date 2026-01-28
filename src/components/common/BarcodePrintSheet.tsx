@@ -92,8 +92,7 @@ export default function BarcodePrintSheet({ items }: Props) {
       </div>
 
 
-      <style dangerouslySetInnerHTML={{
-        __html: `
+      <style>{`
         /* ================================================
            SCREEN PREVIEW STYLES (SMALL STANDARD)
            ================================================ */
@@ -263,7 +262,7 @@ export default function BarcodePrintSheet({ items }: Props) {
             margin: 0 !important;
           }
         }
-      `}} />
+      `}</style>
     </>
   );
 }

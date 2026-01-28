@@ -448,9 +448,13 @@ export default function ShopExpense() {
       </html>
     `;
 
-    // Write directly to the window
-    printWindow.document.write(html);
-    printWindow.document.close();
+    // Use safer DOM manipulation instead of document.write()
+    printWindow.document.documentElement.innerHTML = html;
+
+    // Trigger print after content is loaded
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
   };
 
   // Input styles
