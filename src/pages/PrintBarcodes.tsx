@@ -1,7 +1,7 @@
 // src/pages/PrintBarcodes.tsx - AUTO PRINT ON LOAD
 import { useEffect, useState } from "react";
 import BarcodePrintSheet from "../components/common/BarcodePrintSheet";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, Printer } from "lucide-react";
 import { getItemByBarcode, markItemsPrinted } from "../firebase/warehouseItems";
 import toast from "react-hot-toast";
 
@@ -37,11 +37,11 @@ export default function PrintBarcodes() {
   // Auto-trigger print dialog when items are loaded
   useEffect(() => {
     if (items.length > 0 && !autoPrintTriggered) {
-      setAutoPrintTriggered(true);
-      // Small delay to ensure DOM is fully rendered
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        setAutoPrintTriggered(true);
         window.print();
-      }, 500);
+      }, 1000); // Slightly longer delay for professional "Loading" feel
+      return () => clearTimeout(timer);
     }
   }, [items, autoPrintTriggered]);
 
@@ -92,15 +92,22 @@ export default function PrintBarcodes() {
     window.close();
   };
 
+  const triggerManualPrint = () => {
+    window.print();
+  };
+
   if (items.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">No Items to Print</h2>
-          <p className="text-gray-600 mb-4">Please select items from the tagging page first.</p>
+        <div className="text-center p-8 bg-white rounded-2xl shadow-xl border border-gray-100">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Printer size={32} className="text-gray-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">No Items in Queue</h2>
+          <p className="text-gray-600 mb-6">Please select items from the tagging page first.</p>
           <button
             onClick={goBack}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold transition-all shadow-md"
           >
             Go Back
           </button>
@@ -110,35 +117,52 @@ export default function PrintBarcodes() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50/50">
       {/* Print Controls - Hidden when printing */}
-      <div className="no-print bg-white border-b border-gray-200 p-4 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">Print Preview</h1>
-            <p className="text-sm text-gray-600">{items.length} items ready - Print dialog will open automatically</p>
-            {printCompleted && (
-              <p className="text-sm text-green-600 font-semibold mt-1 flex items-center gap-1">
-                <CheckCircle size={16} />
-                Items marked as printed in database
-              </p>
-            )}
+      <div className="no-print bg-white/80 backdrop-blur-md border-b border-gray-200 p-4 sticky top-0 z-30 shadow-sm">
+        <div className="max-w-5xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-200">
+              <Printer size={20} />
+            </div>
+            <div>
+              <h1 className="text-lg font-black text-gray-800 uppercase tracking-tight">Print Queue</h1>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded leading-none">
+                  {items.length} TAGS READY
+                </span>
+                {!autoPrintTriggered && (
+                  <span className="text-[10px] text-gray-400 animate-pulse flex items-center gap-1 font-medium">
+                    <span className="w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+                    Preparing print dialog...
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
+
           <div className="flex gap-3">
             <button
-              onClick={goBack}
-              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 flex items-center gap-2"
+              onClick={triggerManualPrint}
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2 font-bold text-sm shadow-sm transition-all"
             >
-              <ArrowLeft size={18} />
+              <Printer size={16} />
+              Re-Print
+            </button>
+            <button
+              onClick={goBack}
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2 font-bold text-sm shadow-sm transition-all"
+            >
+              <ArrowLeft size={16} />
               Close
             </button>
             {!printCompleted && (
               <button
                 onClick={markAsPrinted}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 font-semibold disabled:opacity-50"
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 font-black text-sm shadow-lg shadow-green-200 disabled:opacity-50 transition-all"
                 disabled={isPrinting}
               >
-                <CheckCircle size={18} />
+                <CheckCircle size={16} />
                 Mark as Printed
               </button>
             )}
@@ -147,14 +171,23 @@ export default function PrintBarcodes() {
       </div>
 
       {/* Print Preview Area */}
-      <div className="max-w-7xl mx-auto py-8 px-4">
-        <div className="no-print mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm text-blue-800">
-            <strong>ℹ️ Print Dialog Opening:</strong> The browser print dialog will open automatically.
-            If it doesn't appear, check if pop-ups are blocked or manually trigger print with Ctrl+P.
-          </p>
+      <div className="max-w-5xl mx-auto py-12 px-6">
+        {!autoPrintTriggered && (
+          <div className="no-print mb-8 p-10 bg-white border border-blue-100 rounded-3xl shadow-xl shadow-blue-50/50 text-center">
+            <div className="inline-block p-4 bg-blue-50 rounded-2xl mb-4 animate-bounce">
+              <Printer size={40} className="text-blue-500" />
+            </div>
+            <h2 className="text-xl font-black text-gray-800 mb-2">Initializing Barcode Printer</h2>
+            <p className="text-gray-500 max-w-sm mx-auto text-sm">
+              The browser print dialog will open automatically in a second.
+              Please ensure your thermal printer is selected.
+            </p>
+          </div>
+        )}
+
+        <div className="bg-white p-8 rounded-3xl shadow-inner border border-gray-100 min-h-[400px]">
+          <BarcodePrintSheet items={items} />
         </div>
-        <BarcodePrintSheet items={items} />
       </div>
     </div>
   );

@@ -202,26 +202,7 @@ export default function TestBarcodeScanner() {
             </div>
 
 
-            {/* Print Styles */}
-            <style>{`
-        @media print {
-          .no-print {
-            display: none !important;
-          }
-          body {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-          .print\\:border-black {
-            border-color: black !important;
-            border-width: 2px !important;
-          }
-          .print\\:break-inside-avoid {
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-        }
-      `}</style>
         </>
     );
 }
+
