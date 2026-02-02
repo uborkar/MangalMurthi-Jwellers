@@ -12,15 +12,19 @@ import {
   AlertCircle,
   Trash2,
   Scan,
+  History,
+  Calendar,
+  Filter,
 } from "lucide-react";
 
 import {
+  getItemCountByStatus,
+  deleteWarehouseItem,
+  getWarehouseItemsByDateRange,
   getItemsByStatus,
   stockInItems,
   WarehouseItem,
   getItemByBarcode,
-  getItemCountByStatus,
-  deleteWarehouseItem,
 } from "../../firebase/warehouseItems";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
 
@@ -41,6 +45,19 @@ export default function StockIn() {
   // Barcode scanner state
   const [scannerEnabled, setScannerEnabled] = useState(false);
   const [scannedQueue, setScannedQueue] = useState<WarehouseItem[]>([]);
+
+  // History state
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyItems, setHistoryItems] = useState<WarehouseItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyDateFrom, setHistoryDateFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7); // Default to last 7 days
+    return d.toISOString().split("T")[0];
+  });
+  const [historyDateTo, setHistoryDateTo] = useState(() => {
+    return new Date().toISOString().split("T")[0];
+  });
 
   // Prevent duplicate loading on mount
   const hasLoadedRef = useRef(false);
@@ -93,6 +110,31 @@ export default function StockIn() {
       console.error("Error loading status counts:", error);
     }
   };
+
+  const loadStockInHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const items = await getWarehouseItemsByDateRange(
+        "stocked",
+        historyDateFrom,
+        historyDateTo,
+        "stockedAt"
+      );
+      setHistoryItems(items);
+      toast.success(`Loaded ${items.length} historical stock-in records`);
+    } catch (error) {
+      console.error("Error loading stock-in history:", error);
+      toast.error("Failed to load history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showHistory) {
+      loadStockInHistory();
+    }
+  }, [showHistory]);
 
   // Barcode scanner handler
   const handleBarcodeScan = async (barcode: string) => {
@@ -395,10 +437,10 @@ export default function StockIn() {
             <div className="grid grid-cols-2 md:grid-cols-6 gap-3 md:gap-4 mb-6">
               <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
                 <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-xl dark:bg-gray-800 mb-3">
-                  <span className="text-xl">🏷️</span>
+                  <span className="text-xl">📋</span>
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">Ready Items</span>
-                <h4 className="mt-1 font-bold text-gray-800 text-lg dark:text-white/90">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Loaded Items</span>
+                <h4 className="mt-1 font-bold text-gray-800 text-lg dark:text-white/90" title="Items ready to be stocked in current view">
                   {stats.totalReady}
                 </h4>
               </div>
@@ -407,38 +449,38 @@ export default function StockIn() {
                 <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-xl dark:bg-gray-800 mb-3">
                   <Search className="text-purple-600 dark:text-purple-400" size={20} />
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">Filtered</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">Applied Filter</span>
                 <h4 className="mt-1 font-bold text-purple-600 text-lg dark:text-purple-400">
                   {stats.filtered}
                 </h4>
               </div>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-                <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-xl dark:bg-gray-800 mb-3">
-                  <CheckCircle className="text-green-600 dark:text-green-400" size={20} />
+                <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-xl dark:bg-blue-900/30 mb-3">
+                  <CheckCircle className="text-blue-600 dark:text-blue-400" size={20} />
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">Selected</span>
-                <h4 className="mt-1 font-bold text-green-600 text-lg dark:text-green-400">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Selection</span>
+                <h4 className="mt-1 font-bold text-blue-600 text-lg dark:text-blue-400">
                   {stats.selected}
                 </h4>
               </div>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-                <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-xl dark:bg-gray-800 mb-3">
-                  <CheckCircle className="text-green-600 dark:text-green-400" size={20} />
+                <div className="flex items-center justify-center w-10 h-10 bg-amber-100 rounded-xl dark:bg-amber-900/30 mb-3">
+                  <span className="text-xl">🖨️</span>
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">Printed</span>
-                <h4 className="mt-1 font-bold text-gray-800 text-lg dark:text-white/90">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Total Printed</span>
+                <h4 className="mt-1 font-bold text-amber-600 text-lg dark:text-amber-400" title="Total items across all categories awaiting stock-in">
                   {stats.totalPrinted}
                 </h4>
               </div>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-                <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-xl dark:bg-gray-800 mb-3">
-                  <Package className="text-blue-600 dark:text-blue-400" size={20} />
+                <div className="flex items-center justify-center w-10 h-10 bg-green-100 rounded-xl dark:bg-green-900/30 mb-3">
+                  <Package className="text-green-600 dark:text-green-400" size={20} />
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">In Stock</span>
-                <h4 className="mt-1 font-bold text-blue-600 text-lg dark:text-blue-400">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Warehouse Stock</span>
+                <h4 className="mt-1 font-bold text-green-600 text-lg dark:text-green-400" title="Total items currently in warehouse inventory">
                   {stats.totalStocked}
                 </h4>
               </div>
@@ -447,12 +489,13 @@ export default function StockIn() {
                 <div className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded-xl dark:bg-gray-800 mb-3">
                   <span className="text-xl">📤</span>
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">Distributed</span>
-                <h4 className="mt-1 font-bold text-gray-800 text-lg dark:text-white/90">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Total Distributed</span>
+                <h4 className="mt-1 font-bold text-gray-800 text-lg dark:text-white/90" title="Total items sent out to shop locations">
                   {stats.totalDistributed}
                 </h4>
               </div>
             </div>
+
 
             {/* Barcode Scanner Section */}
             <div className="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-2 border-indigo-200 dark:border-indigo-800/50 rounded-xl p-4">
@@ -798,7 +841,136 @@ export default function StockIn() {
             )}
           </TASection>
         </div>
-      </div>
+        {/* Recent Stock-In History SECTION */}
+        <div className="col-span-12">
+          <TASection
+            title="📜 Detailed Stock-In History"
+            subtitle="View item-by-item breakdown of past stock-in records"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <div className="flex flex-wrap gap-3 items-center">
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="px-5 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+                >
+                  <History size={18} />
+                  {showHistory ? "Hide History" : "Show Detailed History"}
+                </button>
+
+                {showHistory && (
+                  <button
+                    onClick={loadStockInHistory}
+                    disabled={historyLoading}
+                    className="px-5 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium transition-colors flex items-center gap-2"
+                  >
+                    {historyLoading ? "🔄 Loading..." : "🔄 Refresh"}
+                  </button>
+                )}
+              </div>
+
+              {showHistory && (
+                <div className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 dark:bg-white/5 rounded-2xl border border-gray-200 dark:border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <Calendar size={16} className="text-gray-400" />
+                    <span className="text-xs font-medium text-gray-500">From:</span>
+                    <input
+                      type="date"
+                      value={historyDateFrom}
+                      onChange={(e) => setHistoryDateFrom(e.target.value)}
+                      className="bg-transparent border-none text-xs font-bold text-gray-700 dark:text-gray-300 focus:ring-0 p-0"
+                    />
+                  </div>
+                  <div className="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-1" />
+                  <div className="flex items-center gap-2">
+                    <Calendar size={16} className="text-gray-400" />
+                    <span className="text-xs font-medium text-gray-500">To:</span>
+                    <input
+                      type="date"
+                      value={historyDateTo}
+                      onChange={(e) => setHistoryDateTo(e.target.value)}
+                      className="bg-transparent border-none text-xs font-bold text-gray-700 dark:text-gray-300 focus:ring-0 p-0"
+                    />
+                  </div>
+                  <button
+                    onClick={loadStockInHistory}
+                    className="ml-2 p-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
+                  >
+                    <Filter size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {showHistory && (
+              <>
+                {historyLoading ? (
+                  <div className="py-20 text-center">
+                    <div className="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent text-indigo-600 rounded-full mb-4"></div>
+                    <p className="text-gray-500 dark:text-gray-400">Fetching historical records...</p>
+                  </div>
+                ) : historyItems.length === 0 ? (
+                  <div className="py-20 text-center bg-gray-50 dark:bg-white/5 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-800">
+                    <div className="text-4xl mb-3">📅</div>
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1">No Records Found</h3>
+                    <p className="text-gray-500 dark:text-gray-400">No stock-in operations recorded for this period.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-gray-800">
+                        <tr className="text-left font-semibold text-gray-700 dark:text-gray-300">
+                          <th className="p-4 text-xs">Barcode</th>
+                          <th className="p-4 text-xs">Category</th>
+                          <th className="p-4 text-xs">Item Name</th>
+                          <th className="p-4 text-xs">Weight</th>
+                          <th className="p-4 text-xs">CP Type</th>
+                          <th className="p-4 text-xs">Location</th>
+                          <th className="p-4 text-xs">Stocked At</th>
+                          <th className="p-4 text-xs">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {historyItems
+                          .sort((a, b) => new Date(b.stockedAt!).getTime() - new Date(a.stockedAt!).getTime())
+                          .map((item) => (
+                            <tr
+                              key={item.id}
+                              className="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                            >
+                              <td className="p-4">
+                                <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 rounded">
+                                  {item.barcode}
+                                </span>
+                              </td>
+                              <td className="p-4 text-gray-700 dark:text-gray-300">{item.category}</td>
+                              <td className="p-4 font-medium text-gray-800 dark:text-white">{item.remark}</td>
+                              <td className="p-4 font-mono text-gray-600 dark:text-gray-400">{item.weight}g</td>
+                              <td className="p-4">
+                                <span className="text-xs bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded">
+                                  {item.costPriceType}
+                                </span>
+                              </td>
+                              <td className="p-4 text-gray-600 dark:text-gray-400">{item.location}</td>
+                              <td className="p-4 text-xs text-gray-500 dark:text-gray-400">
+                                {item.stockedAt ? new Date(item.stockedAt).toLocaleString() : "-"}
+                              </td>
+                              <td className="p-4">
+                                <span className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                  {item.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </TASection>
+        </div>
+      </div >
     </>
   );
 }
+

@@ -7,7 +7,7 @@ import { Download, TrendingUp, Package, CheckCircle, Truck, ShoppingBag, Filter,
 import {
   getItemCountByStatus,
   getItemCountByCategory,
-  getAllWarehouseItems,
+  getWarehouseItemsByDateRange,
   ItemStatus,
   WarehouseItem,
 } from "../../firebase/warehouseItems";
@@ -67,17 +67,18 @@ export default function WarehouseReports() {
   const loadReports = async () => {
     setLoading(true);
     try {
-      const [counts, categories, items] = await Promise.all([
+      const [counts, categories] = await Promise.all([
         getItemCountByStatus(),
         getItemCountByCategory(),
-        getAllWarehouseItems(),
       ]);
 
       setStatusCounts(counts);
       setCategoryCounts(categories);
-      setAllItems(items);
 
-      toast.success("Reports loaded successfully");
+      // Don't load all items by default - wait for user to specify filters or click detailed view
+      // if (showDetailedView) await fetchDetailedItems();
+
+      toast.success("Dashboard metrics loaded");
     } catch (error) {
       console.error("Error loading reports:", error);
       toast.error("Failed to load reports");
@@ -85,6 +86,44 @@ export default function WarehouseReports() {
       setLoading(false);
     }
   };
+
+  const fetchDetailedItems = async () => {
+    setLoading(true);
+    try {
+      // If no dates specified, default to last 30 days for safety
+      let from = filterDateFrom;
+      let to = filterDateTo;
+
+      if (!from && !to) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 1);
+        from = d.toISOString().split('T')[0];
+        toast("Loading last 30 days of data by default", { icon: "ℹ️" });
+      }
+
+      const items = await getWarehouseItemsByDateRange(
+        filterStatus as ItemStatus | "all",
+        from,
+        to,
+        "taggedAt" // Base filtering on creation/tagging date
+      );
+
+      setAllItems(items);
+      toast.success(`Loaded ${items.length} records matching filters`);
+    } catch (error) {
+      console.error("Error fetching detailed items:", error);
+      toast.error("Failed to load detailed records");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch items when detailed view is opened or filters are applied
+  useEffect(() => {
+    if (showDetailedView) {
+      fetchDetailedItems();
+    }
+  }, [showDetailedView]);
 
   // Apply filters to items
   const getFilteredItems = () => {
@@ -465,15 +504,23 @@ export default function WarehouseReports() {
 
                 <div className="flex gap-3 mt-4">
                   <button
-                    onClick={clearFilters}
+                    onClick={() => {
+                      clearFilters();
+                      setAllItems([]);
+                    }}
                     className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-lg font-medium transition-colors"
                   >
                     Clear Filters
                   </button>
                   <div className="flex-1" />
-                  <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center">
-                    Showing <strong className="mx-1">{filteredCount}</strong> of <strong className="mx-1">{totalItems}</strong> items
-                  </div>
+                  <button
+                    onClick={fetchDetailedItems}
+                    disabled={loading}
+                    className="px-5 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                  >
+                    <TrendingUp size={16} />
+                    Apply & Load Data
+                  </button>
                 </div>
               </div>
             )}
