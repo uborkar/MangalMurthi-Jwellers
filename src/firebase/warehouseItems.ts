@@ -15,6 +15,7 @@ import {
   writeBatch,
   Timestamp,
   getCountFromServer,
+  orderBy,
 } from "firebase/firestore";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -171,7 +172,7 @@ export async function getItemsByStatus(
 }
 
 /**
- * Get items by status and date range (for optimized history/reports)
+ * Get items by status and date range (Optimized with graceful index fallback)
  */
 export async function getWarehouseItemsByDateRange(
   status: ItemStatus | "all",
@@ -179,28 +180,63 @@ export async function getWarehouseItemsByDateRange(
   dateTo?: string,
   dateField: string = "createdAt"
 ): Promise<WarehouseItem[]> {
-  let q = query(ITEMS_COLLECTION);
+  const tryQuery = async (useComposite: boolean) => {
+    let q = query(ITEMS_COLLECTION);
 
-  if (status !== "all") {
-    q = query(q, where("status", "==", status));
+    // 1. Filter by Status
+    if (status !== "all") {
+      q = query(q, where("status", "==", status));
+    }
+
+    // 2. Filter by Dates (Server-side if useComposite is true)
+    if (useComposite) {
+      if (dateFrom) {
+        q = query(q, where(dateField, ">=", dateFrom));
+      }
+      if (dateTo) {
+        const endOfDay = new Date(dateTo);
+        endOfDay.setHours(23, 59, 59, 999);
+        q = query(q, where(dateField, "<=", endOfDay.toISOString()));
+      }
+      q = query(q, orderBy(dateField, "desc"));
+    } else {
+      // If index is missing, just sort by date and we'll filter client-side
+      q = query(q, orderBy(dateField, "desc"));
+    }
+
+    const snap = await getDocs(q);
+    let items = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<WarehouseItem, "id">),
+    }));
+
+    // 3. Client-side Date Filter (Fallback)
+    if (!useComposite) {
+      if (dateFrom) {
+        items = items.filter(item => (item as any)[dateField] >= dateFrom);
+      }
+      if (dateTo) {
+        const endOfDay = new Date(dateTo);
+        endOfDay.setHours(23, 59, 59, 999);
+        const toStr = endOfDay.toISOString();
+        items = items.filter(item => (item as any)[dateField] <= toStr);
+      }
+    }
+
+    return items;
+  };
+
+  try {
+    // Attempt the optimized composite query first
+    return await tryQuery(true);
+  } catch (error: any) {
+    // If Firebase says "Index Missing", fallback to client-side filtering
+    if (error.code === 'failed-precondition' || error.message?.includes('index')) {
+      console.warn("⚠️ Firebase Index missing for this query. Falling back to client-side filtering while index builds...");
+      return await tryQuery(false);
+    }
+    throw error;
   }
-
-  if (dateFrom) {
-    q = query(q, where(dateField, ">=", dateFrom));
-  }
-
-  if (dateTo) {
-    // Add time to dateTo to include the entire day
-    const endOfDay = new Date(dateTo);
-    endOfDay.setHours(23, 59, 59, 999);
-    q = query(q, where(dateField, "<=", endOfDay.toISOString()));
-  }
-
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({
-    id: d.id,
-    ...(d.data() as Omit<WarehouseItem, "id">),
-  }));
 }
 
 /**
