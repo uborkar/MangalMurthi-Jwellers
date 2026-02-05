@@ -58,23 +58,6 @@ export default function Tagging() {
   // UI state
   const [reserving, setReserving] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [itemsToPrint, setItemsToPrint] = useState<any[]>([]);
-  const [isPreparingPrint, setIsPreparingPrint] = useState(false);
-
-  // Trigger print when itemsToPrint is updated
-  useEffect(() => {
-    if (itemsToPrint.length > 0 && isPreparingPrint) {
-      // Use a very small delay just to let the DOM update
-      const timer = setTimeout(() => {
-        window.print();
-        setIsPreparingPrint(false);
-        setItemsToPrint([]);
-      }, 100);
-
-      return () => clearTimeout(timer);
-    }
-  }, [itemsToPrint, isPreparingPrint]);
-
   // Set default category and location when they load
   useEffect(() => {
     if (loadedCategories.length > 0 && categoryOptions.length === 0) {
@@ -210,8 +193,6 @@ export default function Tagging() {
       return;
     }
 
-    setIsPreparingPrint(true);
-
     // Prepare print data
     const printItems = selectedItems.map(item => ({
       barcodeValue: item.barcodeValue,
@@ -223,9 +204,14 @@ export default function Tagging() {
       remark: remark,
     }));
 
-    setItemsToPrint(printItems);
+    // Prepare barcodes list for marking as printed
+    const barcodesForMarking = selectedItems.map(item => item.barcodeValue);
 
-    // Mark items as printed in UI
+    // Save to localStorage for the print page
+    localStorage.setItem("print_barcodes", JSON.stringify(printItems));
+    localStorage.setItem("print_item_barcodes", JSON.stringify(barcodesForMarking));
+
+    // Mark items as printed in local UI
     setGrid((prev) =>
       prev.map((item) =>
         selectedItems.find((si) => si.id === item.id)
@@ -235,6 +221,9 @@ export default function Tagging() {
     );
 
     toast.success(`Preparing labels for ${selectedItems.length} items...`);
+
+    // Open print page in new window
+    window.open("/print-barcodes", "_blank");
   };
 
   // --------------------------------------------------------------------------------------
@@ -534,11 +523,7 @@ export default function Tagging() {
           </div>
         </div>
       </div>
-
-      {/* Hidden Print Container */}
-      <div className="print-only-container">
-        {itemsToPrint.length > 0 && <BarcodePrintSheet items={itemsToPrint} />}
-      </div>
+      {/* No in-page print container needed as we use a dedicated print page */}
     </>
   );
 }

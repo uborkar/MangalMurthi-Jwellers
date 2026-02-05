@@ -16,6 +16,7 @@ import {
   Timestamp,
   getCountFromServer,
   orderBy,
+  limit,
 } from "firebase/firestore";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -161,7 +162,25 @@ export async function getItemsByStatus(
   limitCount: number = 500
 ): Promise<WarehouseItem[]> {
   console.log(`🔍 Querying warehouseItems where status == "${status}" (limit: ${limitCount})`);
-  const q = query(ITEMS_COLLECTION, where("status", "==", status));
+  const q = query(ITEMS_COLLECTION, where("status", "==", status), limit(limitCount));
+  const snap = await getDocs(q);
+  console.log(`✅ Query returned ${snap.size} documents`);
+
+  return snap.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<WarehouseItem, "id">),
+  }));
+}
+
+/**
+ * Get items by multiple statuses
+ */
+export async function getItemsByStatuses(
+  statuses: ItemStatus[],
+  limitCount: number = 1000
+): Promise<WarehouseItem[]> {
+  console.log(`🔍 Querying warehouseItems where status in [${statuses.join(', ')}] (limit: ${limitCount})`);
+  const q = query(ITEMS_COLLECTION, where("status", "in", statuses), limit(limitCount));
   const snap = await getDocs(q);
   console.log(`✅ Query returned ${snap.size} documents`);
 
@@ -430,7 +449,9 @@ export async function stockInItems(
   itemIds: string[],
   stockedBy?: string
 ): Promise<number> {
-  const items = itemIds.map(id => ({ id, currentStatus: "printed" as ItemStatus }));
+  // Allow transitions from either 'tagged' or 'printed' to 'stocked' 
+  // (Provides better UX if user forgot 'mark as printed' step)
+  const items = itemIds.map(id => ({ id, currentStatus: "any" as any }));
   return await batchUpdateItemStatus(items, "stocked", {
     stockedAt: new Date().toISOString(),
     stockedBy,
@@ -607,7 +628,7 @@ export async function barcodeExists(barcode: string): Promise<boolean> {
  */
 export function isValidStatusTransition(from: ItemStatus, to: ItemStatus): boolean {
   const validTransitions: Record<ItemStatus, ItemStatus[]> = {
-    tagged: ["printed"],
+    tagged: ["printed", "stocked"], // Allow tagged -> stocked for convenience
     printed: ["stocked"],
     stocked: ["distributed", "returned"],
     distributed: ["sold", "returned"],
@@ -623,7 +644,7 @@ export function isValidStatusTransition(from: ItemStatus, to: ItemStatus): boole
  */
 export function getNextValidStatuses(currentStatus: ItemStatus): ItemStatus[] {
   const validTransitions: Record<ItemStatus, ItemStatus[]> = {
-    tagged: ["printed"],
+    tagged: ["printed", "stocked"],
     printed: ["stocked"],
     stocked: ["distributed", "returned"],
     distributed: ["sold", "returned"],

@@ -606,11 +606,6 @@ span.flatpickr-weekday,
     z-index: 99999 !important;
   }
   
-  /* Hide the main app container when printing */
-  #root > div:not(.print-invoice):not(.print-daily-report):not(.invoice-print) {
-    display: none !important;
-  }
-  
   /* Ensure tables print properly */
   table {
     page-break-inside: auto;

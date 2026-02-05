@@ -25,6 +25,7 @@ import {
   stockInItems,
   WarehouseItem,
   getItemByBarcode,
+  getItemsByStatuses,
 } from "../../firebase/warehouseItems";
 import BarcodeScanner from "../../components/common/BarcodeScanner";
 
@@ -74,9 +75,9 @@ export default function StockIn() {
   const loadTaggedItems = async () => {
     setLoading(true);
     try {
-      console.log("🔍 Loading items with status: 'printed' from warehouseItems collection");
+      console.log("🔍 Loading items with status: ['tagged', 'printed'] from warehouseItems collection");
 
-      const items = await getItemsByStatus("printed");
+      const items = await getItemsByStatuses(["tagged", "printed"]);
 
       console.log(`✅ Query returned ${items.length} items`);
       if (items.length > 0) {
@@ -146,7 +147,7 @@ export default function StockIn() {
         return;
       }
 
-      if (item.status !== "printed") {
+      if (item.status !== "printed" && item.status !== "tagged") {
         toast.error(`Item ${barcode} is not ready for stock-in. Status: ${item.status}`);
         return;
       }
