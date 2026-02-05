@@ -78,8 +78,8 @@ export default function BarcodePrintSheet({ items }: Props) {
                 <div className="print-barcode">
                   <BarcodeView
                     value={item.barcodeValue}
-                    height={28}
-                    width={0.8} // Shrinked width for printing too
+                    height={30}
+                    width={0.7}
                     displayValue={false}
                   />
                 </div>

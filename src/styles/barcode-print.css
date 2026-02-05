@@ -102,9 +102,9 @@
     height: 15mm !important;
     display: flex !important;
     align-items: center !important;
-    page-break-after: always !important;
     overflow: hidden !important;
     background: #fff !important;
+    margin-bottom: 2mm !important;
   }
 
   .print-tag-body {
@@ -120,7 +120,7 @@
     display: flex !important;
     flex-direction: column !important;
     justify-content: center !important;
-    overflow: hidden !important;
+    overflow: visible !important;
   }
 
   .print-left {
@@ -139,6 +139,8 @@
 
   .print-right {
     text-align: center !important;
+    overflow: visible !important;
+    padding: 0 1mm !important;
   }
 
   .print-cat {
@@ -150,7 +152,11 @@
   .print-barcode {
     display: flex !important;
     justify-content: center !important;
-    height: 7mm !important;
+    align-items: center !important;
+    height: 8mm !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .print-val {

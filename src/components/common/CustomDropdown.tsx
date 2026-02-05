@@ -127,14 +127,16 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
                         shadow-xl shadow-black/10 dark:shadow-black/40
                         border border-gray-200 dark:border-gray-700
                         py-1.5
-                        overflow-hidden
+                        max-h-[350px]
+                        overflow-auto
+                        flex flex-col
                     "
                     style={{
                         animation: "dropdownFadeIn 0.15s ease-out",
                     }}
                 >
                     {/* Options List */}
-                    <div className="max-h-[220px] overflow-y-auto custom-scrollbar">
+                    <div className="max-h-[200px] overflow-y-auto custom-scrollbar flex-shrink-0">
                         {options.length === 0 ? (
                             <div className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500 text-center italic">
                                 No options available

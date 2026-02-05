@@ -10,7 +10,7 @@ import { useLocations } from "../../hooks/useLocations";
 
 import { reserveSerials } from "../../firebase/serials";
 import BarcodeView from "../../components/common/BarcodeView";
-import { makeBarcodeValue, CATEGORY_CODES, LOCATION_CODES } from "../../utils/barcode";
+import { makeBarcodeValue, CATEGORY_CODES, getLocationCode } from "../../utils/barcode";
 
 import { batchAddWarehouseItems, markItemsPrinted, getItemByBarcode } from "../../firebase/warehouseItems";
 import BarcodePrintSheet from "../../components/common/BarcodePrintSheet";
@@ -109,7 +109,7 @@ export default function Tagging() {
 
     try {
       const catCode = CATEGORY_CODES[category] ?? "UNK";
-      const locCode = LOCATION_CODES[location] ?? "LOC";
+      const locCode = getLocationCode(location);
       const yy = new Date().getFullYear();
       const counterKey = `MG-${catCode}-${String(yy).slice(-2)}`;
 
@@ -237,7 +237,7 @@ export default function Tagging() {
 
     try {
       const catCode = CATEGORY_CODES[category] ?? "UNK";
-      const locCode = LOCATION_CODES[location] ?? "LOC";
+      const locCode = getLocationCode(location);
       const year = new Date().getFullYear();
 
       // Prepare items for batch save - SIMPLE FLAT STRUCTURE
