@@ -32,6 +32,7 @@ import { numberToWords } from "../../utils/numberToWords";
 import { createPrintHTML, printDocument } from "../../utils/printUtils";
 import CustomDropdown from "../../components/common/CustomDropdown";
 import { getAllActiveSalespersons, addSalesperson, deleteSalesperson, Salesperson } from "../../firebase/salespersons";
+import { useAuth } from "../../context/AuthContext";
 
 type BranchName = "Sangli" | "Miraj" | "Kolhapur" | "Mumbai" | "Pune";
 
@@ -65,6 +66,7 @@ const RETURN_REASONS = [
 ];
 
 export default function Billing() {
+  const { user, userProfile } = useAuth();
   const { branchStockCache, setBranchStockCache, currentBill, updateBill, clearBill } = useShop();
 
   const [selectedBranch, setSelectedBranch] = useState<BranchName>(currentBill.branch);
@@ -848,7 +850,7 @@ export default function Billing() {
           customerPhone,
           totals.grandTotal,
           salespersonName,
-          "current-user" // TODO: Get from auth
+          user?.email || userProfile?.displayName || "unknown"
         );
         console.log("✅ Ledger entry created for sale");
       } catch (ledgerError) {

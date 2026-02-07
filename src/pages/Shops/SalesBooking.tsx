@@ -20,6 +20,7 @@ import { useShop, BookingItem as ShopBookingItem, BranchName } from "../../conte
 import { getGSTSettings, GSTSettings, calculateGST, getAppSettings } from "../../firebase/settings";
 import { getAllActiveSalespersons, addSalesperson, deleteSalesperson, Salesperson } from "../../firebase/salespersons";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 
 const DEFAULT_BRANCHES = ["Miraj", "Sangli", "Ichalkaranji", "Tasgaon"];
 
@@ -63,6 +64,7 @@ interface SavedBooking {
 }
 
 export default function SalesBooking() {
+  const { user, userProfile } = useAuth();
   const { branchStockCache, setBranchStockCache, currentBooking, updateBooking, clearBooking } = useShop();
   const navigate = useNavigate();
 
@@ -494,7 +496,7 @@ export default function SalesBooking() {
         remarks: remarks || "",
         status: "pending",
         createdAt: new Date().toISOString(),
-        createdBy: "current-user", // TODO: Get from auth
+        createdBy: user?.email || userProfile?.displayName || "unknown",
       });
 
       toast.dismiss(loadingToast);
@@ -512,7 +514,7 @@ export default function SalesBooking() {
           cashAdvance,
           pendingAmount,
           salespersonName,
-          "current-user" // TODO: Get from auth
+          user?.email || userProfile?.displayName || "unknown"
         );
         console.log("✅ Ledger entry created for booking");
       } catch (ledgerError) {

@@ -5,8 +5,11 @@ import PageMeta from "../../components/common/PageMeta";
 import toast from "react-hot-toast";
 import { Save, Percent, Building2, Phone, Mail, FileText } from "lucide-react";
 import { getAppSettings, updateGSTSettings, updateCompanySettings, AppSettings } from "../../firebase/settings";
+import { useAuth } from "../../context/AuthContext";
 
 export default function AppSettingsPage() {
+  const { user, userProfile } = useAuth();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -59,7 +62,7 @@ export default function AppSettingsPage() {
     } catch (error) {
       console.error("Error loading settings:", error);
       toast.error("Failed to load settings");
-      
+
       // Set defaults on error
       setCgst(1.5);
       setSgst(1.5);
@@ -86,7 +89,7 @@ export default function AppSettingsPage() {
           igst,
           defaultType: defaultGSTType,
         },
-        "current-user" // TODO: Get from auth
+        user?.email || userProfile?.displayName || "unknown"
       );
       toast.success("✅ GST settings saved!");
       await loadSettings();
@@ -110,7 +113,7 @@ export default function AppSettingsPage() {
           companyGSTIN,
           invoicePrefix,
         },
-        "current-user" // TODO: Get from auth
+        user?.email || userProfile?.displayName || "unknown"
       );
       toast.success("✅ Company settings saved!");
       await loadSettings();

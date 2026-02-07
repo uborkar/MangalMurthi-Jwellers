@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import { Plus, Trash2, Save, Calendar, AlertCircle, Printer } from "lucide-react";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
+import { useAuth } from "../../context/AuthContext";
 
 // ═══════════════════════════════════════════════════════════════════════
 // TYPE DEFINITIONS (LOCKED)
@@ -77,6 +78,8 @@ const DESCRIPTION_EXAMPLES = [
 // ═══════════════════════════════════════════════════════════════════════
 
 export default function ShopExpense() {
+  const { user, userProfile } = useAuth();
+
   // State: Filters (MANDATORY)
   const [selectedDate, setSelectedDate] = useState(() => {
     return new Date().toISOString().split("T")[0];
@@ -295,7 +298,7 @@ export default function ShopExpense() {
         totalExpense,
         balance,
         createdAt: new Date().toISOString(),
-        createdBy: "current-user", // TODO: Get from auth
+        createdBy: user?.email || userProfile?.displayName || "unknown",
       });
 
       toast.dismiss(loadingToast);
